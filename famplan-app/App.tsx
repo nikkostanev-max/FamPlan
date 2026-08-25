@@ -482,7 +482,7 @@ const styles = StyleSheet.create({
 
   workbookName: {
     fontSize: 21,
-    fontWeight: "650",
+    fontWeight: "600",
     flexShrink: 1,
   },
 
