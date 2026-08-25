@@ -7,6 +7,7 @@ import {
   StatusBar,
   StyleSheet,
   Text,
+  TextInput,
   View,
   useColorScheme,
 } from "react-native";
@@ -56,7 +57,9 @@ const initialWorkbooks: Workbook[] = [
 export default function App() {
   const systemScheme = useColorScheme();
   const [theme, setTheme] = useState<"system" | "light" | "dark">("system");
-  const [workbooks] = useState(initialWorkbooks);
+  const [workbooks, setWorkbooks] = useState(initialWorkbooks);
+  const [showCreateWorkbook, setShowCreateWorkbook] = useState(false);
+  const [newWorkbookName, setNewWorkbookName] = useState("");
 
   const isDark =
     theme === "dark" ||
@@ -93,6 +96,28 @@ export default function App() {
     );
   };
 
+  const createWorkbook = () => {
+  const name = newWorkbookName.trim();
+
+  if (!name) {
+    Alert.alert("Workbook name required", "Please enter a workbook name.");
+    return;
+  }
+
+  const newWorkbook: Workbook = {
+    id: Date.now().toString(),
+    name,
+    red: 0,
+    orange: 0,
+    blue: 0,
+    green: 0,
+    hasUpdate: false,
+  };
+
+  setWorkbooks((current) => [...current, newWorkbook]);
+  setNewWorkbookName("");
+  setShowCreateWorkbook(false);
+};
   return (
     <SafeAreaView
       style={[styles.safeArea, { backgroundColor: colors.background }]}
@@ -145,12 +170,7 @@ export default function App() {
 
           <Pressable
             style={styles.addButton}
-            onPress={() =>
-              Alert.alert(
-                "New Workbook",
-                "Workbook creation will be connected to Supabase later."
-              )
-            }
+            onPress={() => setShowCreateWorkbook(true)}
           >
             <Text style={styles.addButtonText}>＋</Text>
           </Pressable>
@@ -172,9 +192,12 @@ export default function App() {
             {/* Card header */}
             <View style={styles.cardHeader}>
               <View style={styles.titleArea}>
-                {workbook.hasUpdate && (
-                  <View style={styles.updateCircle} />
-                )}
+                <View
+                  style={[
+                    styles.updateCircle,
+                    !workbook.hasUpdate && styles.updateCircleHidden,
+                  ]}
+                />
 
                 <Text
                   style={[styles.workbookName, { color: colors.text }]}
@@ -258,6 +281,59 @@ export default function App() {
 
         <View style={styles.footerSpace} />
       </ScrollView>
+      {showCreateWorkbook && (
+        <View style={styles.modalOverlay}>
+          <View
+            style={[
+              styles.createWorkbookBox,
+              { backgroundColor: colors.card },
+            ]}
+          >
+            <Text style={[styles.createWorkbookTitle, { color: colors.text }]}>
+              New Workbook
+            </Text>
+
+            <TextInput
+              style={[
+                styles.workbookInput,
+                {
+                  color: colors.text,
+                  borderColor: colors.border,
+                },
+              ]}
+              placeholder="Workbook name"
+              placeholderTextColor={colors.secondaryText}
+              value={newWorkbookName}
+              onChangeText={setNewWorkbookName}
+              autoFocus
+            />
+
+            <View style={styles.modalButtons}>
+              <Pressable
+                style={[
+                  styles.modalButton,
+                  { backgroundColor: colors.iconBackground },
+                ]}
+                onPress={() => {
+                  setNewWorkbookName("");
+                  setShowCreateWorkbook(false);
+                }}
+              >
+                <Text style={[styles.modalButtonText, { color: colors.text }]}>
+                  Cancel
+                </Text>
+              </Pressable>
+
+              <Pressable
+                style={[styles.modalButton, styles.createButton]}
+                onPress={createWorkbook}
+              >
+                <Text style={styles.createButtonText}>Create</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      )}
     </SafeAreaView>
   );
 }
@@ -346,9 +422,9 @@ const styles = StyleSheet.create({
   },
 
   addButton: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     backgroundColor: "#1976D2",
     alignItems: "center",
     justifyContent: "center",
@@ -356,7 +432,7 @@ const styles = StyleSheet.create({
 
   addButtonText: {
     color: "#FFFFFF",
-    fontSize: 27,
+    fontSize: 22,
     fontWeight: "300",
     marginTop: -2,
   },
@@ -389,14 +465,19 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     marginRight: 10,
+    transform: [{ translateY: -9 }],
   },
 
   updateCircle: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
+    width: 9,
+    height: 9,
+    borderRadius: 4.5,
     backgroundColor: "#F4C430",
     marginRight: 9,
+  },
+
+  updateCircleHidden: {
+    backgroundColor: "transparent",
   },
 
   workbookName: {
@@ -408,6 +489,7 @@ const styles = StyleSheet.create({
   cardActions: {
     flexDirection: "row",
     gap: 7,
+    transform: [{ translateY: -9 }],
   },
 
   smallAction: {
@@ -428,23 +510,24 @@ const styles = StyleSheet.create({
     gap: 24,
   },
 
-  statusItem: {
-    alignItems: "center",
-    justifyContent: "center",
+statusItem: {
+  flexDirection: "row",
+  alignItems: "center",
+  justifyContent: "center",
     minWidth: 38,
-  },
+},
 
-  statusCircle: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    marginBottom: 5,
-  },
+statusCircle: {
+  width: 18,
+  height: 18,
+  borderRadius: 9,
+  marginRight: 5,
+},
 
-  statusNumber: {
-    fontSize: 15,
-    fontWeight: "600",
-  },
+statusNumber: {
+  fontSize: 13,
+  fontWeight: "600",
+},
 
   accessibilityLabel: {
     position: "absolute",
@@ -455,5 +538,68 @@ const styles = StyleSheet.create({
 
   footerSpace: {
     height: 40,
+  },
+  modalOverlay: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: "rgba(0, 0, 0, 0.35)",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 20,
+  },
+
+  createWorkbookBox: {
+    width: "100%",
+    maxWidth: 420,
+    borderRadius: 18,
+    padding: 22,
+  },
+
+  createWorkbookTitle: {
+    fontSize: 22,
+    fontWeight: "700",
+    marginBottom: 18,
+  },
+
+  workbookInput: {
+    height: 48,
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    fontSize: 16,
+  },
+
+  modalButtons: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    gap: 10,
+    marginTop: 18,
+  },
+
+  modalButton: {
+    minWidth: 90,
+    height: 42,
+    borderRadius: 21,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 16,
+  },
+
+  modalButtonText: {
+    fontSize: 15,
+    fontWeight: "600",
+  },
+
+  createButton: {
+    backgroundColor: "#1976D2",
+  },
+
+  createButtonText: {
+    color: "#FFFFFF",
+    fontSize: 15,
+    fontWeight: "600",
   },
 });
