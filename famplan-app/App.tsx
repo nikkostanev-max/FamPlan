@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from "react";
+import { Ionicons } from "@expo/vector-icons";
 import {
   Alert,
   Pressable,
@@ -19,6 +20,8 @@ type Task = {
   name: string;
   date?: string;
   location?: string;
+  description?: string;
+  repetition?: string;
   status: TaskStatus;
 };
 
@@ -69,6 +72,8 @@ const initialTasks: Record<string, Task[]> = {
       name: "Clean the kitchen",
       date: "2026-08-26",
       location: "Kitchen",
+      description: "Clean the kitchen thoroughly.",
+      repetition: "Every 7 days",
       status: "orange",
     },
     {
@@ -76,6 +81,7 @@ const initialTasks: Record<string, Task[]> = {
       name: "Buy light bulbs",
       date: "2026-08-27",
       location: "Home Depot",
+      description: "Buy replacement light bulbs.",
       status: "blue",
     },
     {
@@ -88,6 +94,7 @@ const initialTasks: Record<string, Task[]> = {
       name: "Pay electricity bill",
       date: "2026-08-25",
       location: "Online",
+      description: "Pay the monthly electricity bill.",
       status: "red",
     },
   ],
@@ -98,6 +105,8 @@ const initialTasks: Record<string, Task[]> = {
       name: "Oil change",
       date: "2026-09-02",
       location: "Garage",
+      description: "Change engine oil and filter.",
+      repetition: "Every 6 months",
       status: "blue",
     },
     {
@@ -115,6 +124,7 @@ const initialTasks: Record<string, Task[]> = {
       name: "Family dinner",
       date: "2026-08-29",
       location: "Home",
+      description: "Family dinner.",
       status: "blue",
     },
     {
@@ -150,9 +160,33 @@ function parseTaskDate(date?: string) {
   return parsed;
 }
 
+/*
+ * Uses the device/browser locale and its normal short-date
+ * convention instead of forcing one particular format.
+ */
 function formatTaskDate(date?: string) {
   if (!date) {
     return "—";
+  }
+
+  const parts = date.split("-");
+
+  if (parts.length === 3) {
+    const year = Number(parts[0]);
+    const month = Number(parts[1]);
+    const day = Number(parts[2]);
+
+    const localDate = new Date(
+      year,
+      month - 1,
+      day
+    );
+
+    if (!Number.isNaN(localDate.getTime())) {
+      return new Intl.DateTimeFormat(undefined, {
+        dateStyle: "short",
+      }).format(localDate);
+    }
   }
 
   const parsed = new Date(date);
@@ -162,16 +196,14 @@ function formatTaskDate(date?: string) {
   }
 
   return new Intl.DateTimeFormat(undefined, {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
+    dateStyle: "short",
   }).format(parsed);
 }
 
 export default function App() {
   const systemScheme = useColorScheme();
 
-  const [theme, setTheme] =
+  const [theme] =
     useState<"system" | "light" | "dark">("system");
 
   const [workbooks, setWorkbooks] =
@@ -181,6 +213,9 @@ export default function App() {
     useState<Record<string, Task[]>>(initialTasks);
 
   const [selectedWorkbookId, setSelectedWorkbookId] =
+    useState<string | null>(null);
+
+  const [selectedTaskId, setSelectedTaskId] =
     useState<string | null>(null);
 
   const [showCreateWorkbook, setShowCreateWorkbook] =
@@ -242,8 +277,25 @@ export default function App() {
     );
   }, [selectedWorkbookId, tasksByWorkbook]);
 
+  const selectedTask = useMemo(() => {
+    if (!selectedWorkbookId || !selectedTaskId) {
+      return null;
+    }
+
+    return (
+      tasksByWorkbook[selectedWorkbookId]?.find(
+        (task) => task.id === selectedTaskId
+      ) ?? null
+    );
+  }, [
+    selectedWorkbookId,
+    selectedTaskId,
+    tasksByWorkbook,
+  ]);
+
   const openWorkbook = (workbook: Workbook) => {
     setSelectedWorkbookId(workbook.id);
+    setSelectedTaskId(null);
 
     setWorkbooks((current) => {
       const selected = current.find(
@@ -265,6 +317,15 @@ export default function App() {
 
   const goHome = () => {
     setSelectedWorkbookId(null);
+    setSelectedTaskId(null);
+  };
+
+  const goBackToWorkbook = () => {
+    setSelectedTaskId(null);
+  };
+
+  const openTask = (task: Task) => {
+    setSelectedTaskId(task.id);
   };
 
   const openSettings = () => {
@@ -285,9 +346,7 @@ export default function App() {
     const name = newWorkbookName.trim();
 
     if (!name) {
-      setWorkbookError(
-        "Workbook name is required."
-      );
+      setWorkbookError("Workbook name is required.");
       return;
     }
 
@@ -339,9 +398,7 @@ export default function App() {
     const name = newTaskName.trim();
 
     if (!name) {
-      setTaskError(
-        "Task name is required."
-      );
+      setTaskError("Task name is required.");
       return;
     }
 
@@ -385,6 +442,234 @@ export default function App() {
     setShowCreateTask(false);
   };
 
+  /*
+   * TASK DETAILS
+   * The same permanent top bar is displayed here.
+   */
+
+  if (selectedTask && selectedWorkbook) {
+    return (
+      <SafeAreaView
+        style={[
+          styles.safeArea,
+          {
+            backgroundColor: colors.background,
+          },
+        ]}
+      >
+        <StatusBar
+          barStyle={
+            isDark
+              ? "light-content"
+              : "dark-content"
+          }
+        />
+
+        <View
+          style={[
+            styles.topBar,
+            {
+              backgroundColor:
+                colors.topBar,
+              borderBottomColor:
+                colors.border,
+            },
+          ]}
+        >
+          <Pressable
+            style={[
+              styles.topIconButton,
+              {
+                backgroundColor:
+                  colors.iconBackground,
+              },
+            ]}
+            onPress={openSettings}
+          >
+            <Ionicons
+              name="menu-outline"
+              size={23}
+              color={colors.text}
+            />
+          </Pressable>
+
+          <Pressable
+            style={[
+              styles.topIconButton,
+              {
+                backgroundColor:
+                  colors.iconBackground,
+              },
+            ]}
+            onPress={goHome}
+          >
+            <Ionicons
+              name="home-outline"
+              size={22}
+              color={colors.text}
+            />
+          </Pressable>
+
+          <View style={styles.userArea}>
+            <Text
+              style={[
+                styles.userName,
+                {
+                  color: colors.text,
+                },
+              ]}
+            >
+              Nikolay Stanev
+            </Text>
+          </View>
+
+          <Pressable
+            style={[
+              styles.topIconButton,
+              {
+                backgroundColor:
+                  colors.iconBackground,
+              },
+            ]}
+            onPress={openSearch}
+          >
+            <Ionicons
+              name="search-outline"
+              size={22}
+             color={colors.text}
+            />
+          </Pressable>
+        </View>
+
+        <View
+          style={[
+            styles.detailsNavigation,
+            {
+              borderBottomColor:
+                colors.separator,
+            },
+          ]}
+        >
+          <Pressable
+            style={[
+              styles.detailsBackButton,
+              {
+                backgroundColor:
+                  colors.iconBackground,
+              },
+            ]}
+            onPress={goBackToWorkbook}
+          >
+            <Ionicons
+              name="arrow-back-outline"
+              size={23}
+              color={colors.text}
+            />
+          </Pressable>
+
+          <Text
+            style={[
+              styles.detailsNavigationTitle,
+              {
+                color: colors.text,
+              },
+            ]}
+            numberOfLines={1}
+          >
+            {selectedWorkbook.name}
+          </Text>
+        </View>
+
+        <ScrollView
+          contentContainerStyle={
+            styles.detailsContent
+          }
+          showsVerticalScrollIndicator={false}
+        >
+          <Text
+            style={[
+              styles.detailsTitle,
+              {
+                color: colors.text,
+              },
+            ]}
+          >
+            {selectedTask.name}
+          </Text>
+
+          <DetailSection
+            title="Location"
+            value={
+              selectedTask.location ??
+              "Unallocated"
+            }
+            colors={colors}
+            italic={!selectedTask.location}
+          />
+
+          <DetailSection
+            title="Due date"
+            value={formatTaskDate(
+              selectedTask.date
+            )}
+            colors={colors}
+          />
+
+          <DetailSection
+            title="Description"
+            value={
+              selectedTask.description ??
+              "No description"
+            }
+            colors={colors}
+          />
+
+          <DetailSection
+            title="Repetition"
+            value={
+              selectedTask.repetition ??
+              "No repetition"
+            }
+            colors={colors}
+          />
+
+          <View
+            style={[
+              styles.detailSection,
+              {
+                borderTopColor:
+                  colors.separator,
+              },
+            ]}
+          >
+            <Text
+              style={[
+                styles.detailSectionTitle,
+                {
+                  color: colors.text,
+                },
+              ]}
+            >
+              Completion History
+            </Text>
+
+            <Text
+              style={[
+                styles.historyPlaceholder,
+                {
+                  color:
+                    colors.secondaryText,
+                },
+              ]}
+            >
+              No completion history yet.
+            </Text>
+          </View>
+        </ScrollView>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView
       style={[
@@ -403,7 +688,8 @@ export default function App() {
         }
       />
 
-      {/* TOP BAR */}
+      {/* PERMANENT TOP BAR */}
+
       <View
         style={[
           styles.topBar,
@@ -415,7 +701,6 @@ export default function App() {
           },
         ]}
       >
-        {/* Settings */}
         <Pressable
           style={[
             styles.topIconButton,
@@ -426,19 +711,13 @@ export default function App() {
           ]}
           onPress={openSettings}
         >
-          <Text
-            style={[
-              styles.settingsIcon,
-              {
-                color: colors.text,
-              },
-            ]}
-          >
-            ☰
-          </Text>
+          <Ionicons
+            name="menu-outline"
+            size={23}
+            color={colors.text}
+          />
         </Pressable>
 
-        {/* Home */}
         <Pressable
           style={[
             styles.topIconButton,
@@ -449,19 +728,13 @@ export default function App() {
           ]}
           onPress={goHome}
         >
-          <Text
-            style={[
-              styles.homeIcon,
-              {
-                color: colors.text,
-              },
-            ]}
-          >
-            ⌂
-          </Text>
+          <Ionicons
+            name="home-outline"
+            size={22}
+            color={colors.text}
+          />
         </Pressable>
 
-        {/* Username */}
         <View style={styles.userArea}>
           <Text
             style={[
@@ -475,7 +748,6 @@ export default function App() {
           </Text>
         </View>
 
-        {/* Search */}
         <Pressable
           style={[
             styles.topIconButton,
@@ -486,20 +758,16 @@ export default function App() {
           ]}
           onPress={openSearch}
         >
-          <Text
-            style={[
-              styles.searchIcon,
-              {
-                color: colors.text,
-              },
-            ]}
-          >
-            ⌕
-          </Text>
+          <Ionicons
+            name="search-outline"
+            size={22}
+            color={colors.text}
+          />
         </Pressable>
       </View>
 
       {/* HOME SCREEN */}
+
       {!selectedWorkbook && (
         <ScrollView
           contentContainerStyle={
@@ -519,24 +787,21 @@ export default function App() {
               My Workbooks
             </Text>
 
-            {/* New Workbook */}
             <Pressable
-              style={
-                styles.addButton
-              }
+              style={styles.addButton}
               onPress={() => {
                 setWorkbookError("");
                 setNewWorkbookName("");
-                setShowCreateWorkbook(true);
+                setShowCreateWorkbook(
+                  true
+                );
               }}
             >
-              <Text
-                style={
-                  styles.addButtonText
-                }
-              >
-                ＋
-              </Text>
+              <Ionicons
+                name="add"
+                size={23}
+                color="#FFFFFF"
+              />
             </Pressable>
           </View>
 
@@ -559,14 +824,10 @@ export default function App() {
               ]}
             >
               <View
-                style={
-                  styles.cardHeader
-                }
+                style={styles.cardHeader}
               >
                 <View
-                  style={
-                    styles.titleArea
-                  }
+                  style={styles.titleArea}
                 >
                   <View
                     style={[
@@ -595,7 +856,6 @@ export default function App() {
                     styles.cardActions
                   }
                 >
-                  {/* Share */}
                   <Pressable
                     style={[
                       styles.smallAction,
@@ -624,7 +884,6 @@ export default function App() {
                     </Text>
                   </Pressable>
 
-                  {/* Options */}
                   <Pressable
                     style={[
                       styles.smallAction,
@@ -656,58 +915,47 @@ export default function App() {
               </View>
 
               <View
-                style={
-                  styles.statusRow
-                }
+                style={styles.statusRow}
               >
                 <StatusIndicator
                   color="#E53935"
                   value={workbook.red}
                   label="Overdue"
-                  textColor={
-                    colors.text
-                  }
+                  textColor={colors.text}
                 />
 
                 <StatusIndicator
                   color="#F39C12"
                   value={workbook.orange}
                   label="Due"
-                  textColor={
-                    colors.text
-                  }
+                  textColor={colors.text}
                 />
 
                 <StatusIndicator
                   color="#1976D2"
                   value={workbook.blue}
                   label="Upcoming"
-                  textColor={
-                    colors.text
-                  }
+                  textColor={colors.text}
                 />
 
                 <StatusIndicator
                   color="#43A047"
                   value={workbook.green}
                   label="Completed"
-                  textColor={
-                    colors.text
-                  }
+                  textColor={colors.text}
                 />
               </View>
             </Pressable>
           ))}
 
           <View
-            style={
-              styles.footerSpace
-            }
+            style={styles.footerSpace}
           />
         </ScrollView>
       )}
 
       {/* WORKBOOK SCREEN */}
+
       {selectedWorkbook && (
         <View
           style={[
@@ -718,12 +966,27 @@ export default function App() {
             },
           ]}
         >
-          {/* Workbook title */}
           <View
             style={
               styles.workbookScreenHeader
             }
           >
+            <Pressable
+              style={[
+                styles.workbookBackButton,
+                {
+                  backgroundColor:
+                    colors.iconBackground,
+                },
+              ]}
+              onPress={goHome}
+            >
+              <Ionicons
+                name="arrow-back-outline"
+                size={23}
+                color={colors.text}
+              />
+            </Pressable>
             <Text
               style={[
                 styles.workbookScreenTitle,
@@ -798,7 +1061,6 @@ export default function App() {
             </View>
           </View>
 
-          {/* Location tabs */}
           <View
             style={[
               styles.locationTabsWrapper,
@@ -922,11 +1184,8 @@ export default function App() {
             </ScrollView>
           </View>
 
-          {/* Task list */}
           <ScrollView
-            style={
-              styles.taskScroll
-            }
+            style={styles.taskScroll}
             contentContainerStyle={
               styles.taskList
             }
@@ -936,9 +1195,7 @@ export default function App() {
           >
             {selectedTasks.length === 0 && (
               <View
-                style={
-                  styles.emptyTasks
-                }
+                style={styles.emptyTasks}
               >
                 <Text
                   style={[
@@ -984,10 +1241,7 @@ export default function App() {
                       },
                     ]}
                     onPress={() =>
-                      Alert.alert(
-                        task.name,
-                        "Task details will be built next."
-                      )
+                      openTask(task)
                     }
                   >
                     <StatusDot
@@ -1059,7 +1313,6 @@ export default function App() {
             )}
           </ScrollView>
 
-          {/* New Task */}
           <Pressable
             style={
               styles.workbookAddButton
@@ -1072,18 +1325,17 @@ export default function App() {
               setShowCreateTask(true);
             }}
           >
-            <Text
-              style={
-                styles.workbookAddButtonText
-              }
-            >
-              ＋
-            </Text>
+            <Ionicons
+              name="add"
+              size={23}
+              color="#FFFFFF"
+            />                
           </Pressable>
         </View>
       )}
 
       {/* CREATE WORKBOOK */}
+
       {showCreateWorkbook && (
         <View
           style={
@@ -1127,13 +1379,9 @@ export default function App() {
               placeholderTextColor={
                 colors.secondaryText
               }
-              value={
-                newWorkbookName
-              }
+              value={newWorkbookName}
               onChangeText={(text) => {
-                setNewWorkbookName(
-                  text
-                );
+                setNewWorkbookName(text);
                 setWorkbookError("");
               }}
               autoFocus
@@ -1167,9 +1415,7 @@ export default function App() {
                   },
                 ]}
                 onPress={() => {
-                  setNewWorkbookName(
-                    ""
-                  );
+                  setNewWorkbookName("");
                   setWorkbookError("");
                   setShowCreateWorkbook(
                     false
@@ -1212,6 +1458,7 @@ export default function App() {
       )}
 
       {/* CREATE TASK */}
+
       {showCreateTask &&
         selectedWorkbook && (
           <View
@@ -1318,9 +1565,7 @@ export default function App() {
                 placeholderTextColor={
                   colors.secondaryText
                 }
-                value={
-                  newTaskLocation
-                }
+                value={newTaskLocation}
                 onChangeText={
                   setNewTaskLocation
                 }
@@ -1344,9 +1589,7 @@ export default function App() {
                     setNewTaskDate("");
                     setNewTaskLocation("");
                     setTaskError("");
-                    setShowCreateTask(
-                      false
-                    );
+                    setShowCreateTask(false);
                   }}
                 >
                   <Text
@@ -1384,6 +1627,59 @@ export default function App() {
           </View>
         )}
     </SafeAreaView>
+  );
+}
+
+function DetailSection({
+  title,
+  value,
+  colors,
+  italic = false,
+}: {
+  title: string;
+  value: string;
+  colors: {
+    text: string;
+    secondaryText: string;
+    separator: string;
+  };
+  italic?: boolean;
+}) {
+  return (
+    <View
+      style={[
+        styles.detailSection,
+        {
+          borderTopColor:
+            colors.separator,
+        },
+      ]}
+    >
+      <Text
+        style={[
+          styles.detailSectionTitle,
+          {
+            color: colors.text,
+          },
+        ]}
+      >
+        {title}
+      </Text>
+
+      <Text
+        style={[
+          styles.detailSectionValue,
+          {
+            color:
+              colors.secondaryText,
+          },
+          italic &&
+            styles.detailItalic,
+        ]}
+      >
+        {value}
+      </Text>
+    </View>
   );
 }
 
@@ -1465,8 +1761,10 @@ const styles = StyleSheet.create({
     flex: 1,
   },
 
+  /* PERMANENT TOP BAR */
+
   topBar: {
-    height: 76,
+    height: 56,
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 16,
@@ -1496,7 +1794,7 @@ const styles = StyleSheet.create({
     textAlign: "center",
     includeFontPadding: false,
     lineHeight: 24,
-    marginTop: -7,
+    marginTop: 0,
   },
 
   searchIcon: {
@@ -1505,7 +1803,7 @@ const styles = StyleSheet.create({
     textAlign: "center",
     includeFontPadding: false,
     lineHeight: 28,
-    marginTop: -5,
+    marginTop: 0,
   },
 
   userArea: {
@@ -1521,9 +1819,11 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
 
+  /* HOME */
+
   content: {
     paddingHorizontal: 16,
-    paddingTop: 20,
+    paddingTop: 16,
     paddingBottom: 40,
   },
 
@@ -1531,8 +1831,8 @@ const styles = StyleSheet.create({
     position: "relative",
     alignItems: "center",
     justifyContent: "center",
-    marginBottom: 14,
-    minHeight: 32,
+    marginBottom: 12,
+    minHeight: 26,
   },
 
   heading: {
@@ -1557,13 +1857,13 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
     fontSize: 22,
     fontWeight: "300",
-    marginTop: -2,
+    marginTop: 0,
   },
 
   workbookCard: {
     borderRadius: 18,
     borderWidth: 1,
-    padding: 18,
+    padding: 15,
     marginBottom: 14,
     shadowColor: "#000",
     shadowOffset: {
@@ -1578,8 +1878,7 @@ const styles = StyleSheet.create({
   cardHeader: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent:
-      "space-between",
+    justifyContent: "space-between",
     marginBottom: 22,
   },
 
@@ -1604,8 +1903,7 @@ const styles = StyleSheet.create({
   },
 
   updateCircleHidden: {
-    backgroundColor:
-      "transparent",
+    backgroundColor: "transparent",
   },
 
   workbookName: {
@@ -1647,8 +1945,7 @@ const styles = StyleSheet.create({
   statusItem: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent:
-      "center",
+    justifyContent: "center",
     minWidth: 38,
   },
 
@@ -1657,6 +1954,8 @@ const styles = StyleSheet.create({
     height: 18,
     borderRadius: 9,
     marginRight: 5,
+    borderWidth: 1,
+    borderColor: "rgba(0, 0, 0, 0.25)",
   },
 
   statusNumber: {
@@ -1675,21 +1974,29 @@ const styles = StyleSheet.create({
     height: 40,
   },
 
-  /* Workbook screen */
+  /* WORKBOOK */
 
   workbookScreen: {
     flex: 1,
   },
-
+  workbookBackButton: {
+    position: "absolute",
+    left: 16,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 10,
+  },
   workbookScreenHeader: {
-    minHeight: 60,
+    minHeight: 48,
     flexDirection: "row",
     alignItems: "center",
-    justifyContent:
-      "center",
+    justifyContent: "center",
     paddingHorizontal: 16,
-    paddingTop: 10,
-    paddingBottom: 10,
+    paddingTop: 6,
+    paddingBottom: 6,
   },
 
   workbookScreenTitle: {
@@ -1726,10 +2033,8 @@ const styles = StyleSheet.create({
   },
 
   locationTabActive: {
-    backgroundColor:
-      "#1976D2",
-    borderColor:
-      "#1976D2",
+    backgroundColor: "#1976D2",
+    borderColor: "#1976D2",
   },
 
   locationTabText: {
@@ -1797,8 +2102,7 @@ const styles = StyleSheet.create({
 
   emptyTasks: {
     alignItems: "center",
-    justifyContent:
-      "flex-start",
+    justifyContent: "flex-start",
     paddingTop: 30,
     paddingHorizontal: 30,
   },
@@ -1822,8 +2126,7 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor:
-      "#1976D2",
+    backgroundColor: "#1976D2",
     alignItems: "center",
     justifyContent: "center",
   },
@@ -1832,10 +2135,84 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
     fontSize: 22,
     fontWeight: "300",
-    marginTop: -2,
+    marginTop: 0,
   },
 
-  /* Modals */
+  /* TASK DETAILS */
+
+  detailsNavigation: {
+    height: 46,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 16,
+    borderBottomWidth:
+      StyleSheet.hairlineWidth,
+  },
+
+  detailsBackButton: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 10,
+  },
+
+  backIcon: {
+    fontSize: 32,
+    fontWeight: "300",
+    lineHeight: 32,
+    textAlign: "center",
+    includeFontPadding: false,
+    marginTop: 0,
+  },
+
+  detailsNavigationTitle: {
+    fontSize: 15,
+    fontWeight: "600",
+    flex: 1,
+  },
+
+  detailsContent: {
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 40,
+  },
+
+  detailsTitle: {
+    fontSize: 21,
+    fontWeight: "700",
+    marginBottom: 14,
+  },
+
+  detailSection: {
+    borderTopWidth:
+      StyleSheet.hairlineWidth,
+    paddingVertical: 5,
+  },
+
+  detailSectionTitle: {
+    fontSize: 15,
+    fontWeight: "600",
+    marginBottom: 5,
+  },
+
+  detailSectionValue: {
+    fontSize: 15,
+    lineHeight: 21,
+    textAlign: "right",
+  },
+
+  detailItalic: {
+    fontStyle: "italic",
+  },
+
+  historyPlaceholder: {
+    fontSize: 15,
+    lineHeight: 21,
+  },
+
+  /* MODALS */
 
   modalOverlay: {
     position: "absolute",
@@ -1883,8 +2260,7 @@ const styles = StyleSheet.create({
 
   modalButtons: {
     flexDirection: "row",
-    justifyContent:
-      "flex-end",
+    justifyContent: "flex-end",
     gap: 10,
     marginTop: 18,
   },
@@ -1904,8 +2280,7 @@ const styles = StyleSheet.create({
   },
 
   createButton: {
-    backgroundColor:
-      "#1976D2",
+    backgroundColor: "#1976D2",
   },
 
   createButtonText: {
