@@ -28,6 +28,7 @@ type Task = {
 type Workbook = {
   id: string;
   name: string;
+  color: string;
   red: number;
   orange: number;
   blue: number;
@@ -39,6 +40,7 @@ const initialWorkbooks: Workbook[] = [
   {
     id: "1",
     name: "Home",
+    color: "transparent",
     red: 2,
     orange: 3,
     blue: 4,
@@ -48,6 +50,7 @@ const initialWorkbooks: Workbook[] = [
   {
     id: "2",
     name: "Car",
+    color: "transparent",
     red: 0,
     orange: 2,
     blue: 3,
@@ -57,6 +60,7 @@ const initialWorkbooks: Workbook[] = [
   {
     id: "3",
     name: "Family",
+    color: "transparent",
     red: 1,
     orange: 1,
     blue: 2,
@@ -221,6 +225,12 @@ export default function App() {
   const [showCreateWorkbook, setShowCreateWorkbook] =
     useState(false);
 
+  const [showColorPicker, setShowColorPicker] =
+    useState(false);
+
+  const [colorPickerWorkbookId, setColorPickerWorkbookId] =
+    useState<string | null>(null);
+
   const [newWorkbookName, setNewWorkbookName] =
     useState("");
 
@@ -319,7 +329,21 @@ export default function App() {
     setSelectedWorkbookId(null);
     setSelectedTaskId(null);
   };
-
+  const changeWorkbookColor = (
+    workbookId: string,
+    color: string
+  ) => {
+    setWorkbooks((current) =>
+      current.map((workbook) =>
+        workbook.id === workbookId
+          ? {
+              ...workbook,
+              color,
+            }
+          : workbook
+      )
+    );
+  };
   const goBackToWorkbook = () => {
     setSelectedTaskId(null);
   };
@@ -368,6 +392,7 @@ export default function App() {
     const newWorkbook: Workbook = {
       id: newId,
       name,
+      color: "transparent",
       red: 0,
       orange: 0,
       blue: 0,
@@ -480,14 +505,13 @@ export default function App() {
             style={[
               styles.topIconButton,
               {
-                backgroundColor:
-                  colors.iconBackground,
+                backgroundColor: "transparent",
               },
             ]}
             onPress={openSettings}
           >
             <Ionicons
-              name="menu-outline"
+              name="settings-outline"
               size={23}
               color={colors.text}
             />
@@ -497,8 +521,7 @@ export default function App() {
             style={[
               styles.topIconButton,
               {
-                backgroundColor:
-                  colors.iconBackground,
+                backgroundColor: "transparent",
               },
             ]}
             onPress={goHome}
@@ -527,8 +550,7 @@ export default function App() {
             style={[
               styles.topIconButton,
               {
-                backgroundColor:
-                  colors.iconBackground,
+                backgroundColor: "transparent",
               },
             ]}
             onPress={openSearch}
@@ -554,8 +576,7 @@ export default function App() {
             style={[
               styles.detailsBackButton,
               {
-                backgroundColor:
-                  colors.iconBackground,
+                backgroundColor: "transparent",
               },
             ]}
             onPress={goBackToWorkbook}
@@ -705,29 +726,27 @@ export default function App() {
           style={[
             styles.topIconButton,
             {
-              backgroundColor:
-                colors.iconBackground,
+                backgroundColor: "transparent",
             },
           ]}
           onPress={openSettings}
         >
           <Ionicons
-            name="menu-outline"
+            name="settings-outline"
             size={23}
             color={colors.text}
           />
         </Pressable>
 
-        <Pressable
-          style={[
-            styles.topIconButton,
-            {
-              backgroundColor:
-                colors.iconBackground,
-            },
-          ]}
-          onPress={goHome}
-        >
+          <Pressable
+            style={[
+              styles.topIconButton,
+              {
+                backgroundColor: "transparent",
+              },
+            ]}
+            onPress={goHome}
+          >
           <Ionicons
             name="home-outline"
             size={22}
@@ -752,8 +771,7 @@ export default function App() {
           style={[
             styles.topIconButton,
             {
-              backgroundColor:
-                colors.iconBackground,
+              backgroundColor: "transparent",
             },
           ]}
           onPress={openSearch}
@@ -815,7 +833,7 @@ export default function App() {
                 styles.workbookCard,
                 {
                   backgroundColor:
-                    colors.card,
+                    workbook.color,
                   borderColor:
                     colors.border,
                   opacity:
@@ -860,8 +878,7 @@ export default function App() {
                     style={[
                       styles.smallAction,
                       {
-                        backgroundColor:
-                          colors.iconBackground,
+                        backgroundColor: "transparent",
                       },
                     ]}
                     onPress={() =>
@@ -871,45 +888,30 @@ export default function App() {
                       )
                     }
                   >
-                    <Text
-                      style={[
-                        styles.actionText,
-                        {
-                          color:
-                            colors.text,
-                        },
-                      ]}
-                    >
-                      ↗
-                    </Text>
+                    <Ionicons
+                      name="share-outline"
+                      size={20}
+                      color={colors.text}
+                    />
                   </Pressable>
 
                   <Pressable
                     style={[
                       styles.smallAction,
                       {
-                        backgroundColor:
-                          colors.iconBackground,
+                        backgroundColor: "transparent",
                       },
                     ]}
-                    onPress={() =>
-                      Alert.alert(
-                        "Workbook options",
-                        "Archive/delete options will be connected later."
-                      )
-                    }
+                    onPress={() => {
+                      setColorPickerWorkbookId(workbook.id);
+                      setShowColorPicker(true);
+                    }}
                   >
-                    <Text
-                      style={[
-                        styles.actionText,
-                        {
-                          color:
-                            colors.text,
-                        },
-                      ]}
-                    >
-                      ⋯
-                    </Text>
+                    <Ionicons
+                      name="ellipsis-horizontal"
+                      size={20}
+                      color={colors.text}
+                    />
                   </Pressable>
                 </View>
               </View>
@@ -975,8 +977,7 @@ export default function App() {
               style={[
                 styles.workbookBackButton,
                 {
-                  backgroundColor:
-                    colors.iconBackground,
+                  backgroundColor: "transparent",
                 },
               ]}
               onPress={goHome}
@@ -1007,8 +1008,7 @@ export default function App() {
                 style={[
                   styles.smallAction,
                   {
-                    backgroundColor:
-                      colors.iconBackground,
+                    backgroundColor: "transparent",
                   },
                 ]}
                 onPress={() =>
@@ -1018,45 +1018,32 @@ export default function App() {
                   )
                 }
               >
-                <Text
-                  style={[
-                    styles.actionText,
-                    {
-                      color:
-                        colors.text,
-                    },
-                  ]}
-                >
-                  ↗
-                </Text>
+                <Ionicons
+                  name="share-outline"
+                  size={20}
+                  color={colors.text}
+                />
               </Pressable>
 
               <Pressable
                 style={[
                   styles.smallAction,
                   {
-                    backgroundColor:
-                      colors.iconBackground,
+                    backgroundColor: "transparent",
                   },
                 ]}
                 onPress={() =>
                   Alert.alert(
                     "Workbook options",
-                    "Workbook settings will be added later."
+                    "Archive/delete options will be connected later."
                   )
                 }
               >
-                <Text
-                  style={[
-                    styles.actionText,
-                    {
-                      color:
-                        colors.text,
-                    },
-                  ]}
-                >
-                  ⋯
-                </Text>
+                <Ionicons
+                  name="ellipsis-horizontal"
+                  size={20}
+                  color={colors.text}
+                />                   
               </Pressable>
             </View>
           </View>
@@ -1331,6 +1318,159 @@ export default function App() {
               color="#FFFFFF"
             />                
           </Pressable>
+        </View>
+      )}
+
+      {/* WORKBOOK COLOR PICKER */}
+
+      {showColorPicker && (
+        <View style={styles.modalOverlay}>
+          <View
+            style={[
+              styles.colorPickerBox,
+              {
+                backgroundColor: colors.card,
+              },
+            ]}
+          >
+            <Text
+              style={[
+                styles.colorPickerTitle,
+                {
+                  color: colors.text,
+                },
+              ]}
+            >
+              Workbook color
+            </Text>
+
+            <View style={styles.colorPickerGrid}>
+              <View style={styles.colorPickerRow}>
+                <Pressable
+                  style={styles.colorChoice}
+                  onPress={() => {
+                    if (colorPickerWorkbookId) {
+                      changeWorkbookColor(
+                        colorPickerWorkbookId,
+                        "transparent"
+                      );
+                    }
+                    setShowColorPicker(false);
+                    setColorPickerWorkbookId(null);
+                  }}
+                >
+                  <View
+                    style={[
+                      styles.colorCircle,
+                      styles.noColorCircle,
+                      {
+                        borderColor: colors.border,
+                      },
+                    ]}
+                  >
+                    <View
+                      style={[
+                        styles.noColorLine,
+                        {
+                          backgroundColor:
+                            colors.secondaryText,
+                        },
+                      ]}
+                    />
+                  </View>
+                </Pressable>
+
+                {[
+                  "#B8D4F2",
+                  "#B9DCC3",
+                  "#F2C99F",
+                  "#D2BDE8",
+                ].map((color) => (
+                  <Pressable
+                    key={color}
+                    style={styles.colorChoice}
+                    onPress={() => {
+                      if (colorPickerWorkbookId) {
+                        changeWorkbookColor(
+                          colorPickerWorkbookId,
+                          color
+                        );
+                      }
+                      setShowColorPicker(false);
+                      setColorPickerWorkbookId(null);
+                    }}
+                  >
+                    <View
+                      style={[
+                        styles.colorCircle,
+                        {
+                          backgroundColor: color,
+                        },
+                      ]}
+                    />
+                  </Pressable>
+                ))}
+              </View>
+
+              <View style={styles.colorPickerRow}>
+                {[
+                  "#E8B6B6",
+                  "#E6BFD0",
+                  "#D0BBA6",
+                  "#C5C9CE",
+                  "#C2D6D0",
+                ].map((color) => (
+                  <Pressable
+                    key={color}
+                    style={styles.colorChoice}
+                    onPress={() => {
+                      if (colorPickerWorkbookId) {
+                        changeWorkbookColor(
+                          colorPickerWorkbookId,
+                          color
+                        );
+                      }
+                      setShowColorPicker(false);
+                      setColorPickerWorkbookId(null);
+                    }}
+                  >
+                    <View
+                      style={[
+                        styles.colorCircle,
+                        {
+                          backgroundColor: color,
+                        },
+                      ]}
+                    />
+                  </Pressable>
+                ))}
+              </View>
+            </View>
+
+            <Pressable
+              style={[
+                styles.colorPickerCancel,
+                {
+                  backgroundColor: colors.iconBackground,
+                },
+              ]}
+              onPress={() => {
+                setShowColorPicker(false);
+                setColorPickerWorkbookId(null);
+              }}
+            >
+              <Text
+                style={[
+                  styles.modalButtonText,
+                  {
+                    color: colors.text,
+                  },
+                ]}
+              >
+                Cancel
+              </Text>
+            </Pressable>
+          </View>
         </View>
       )}
 
@@ -1817,6 +1957,7 @@ const styles = StyleSheet.create({
   userName: {
     fontSize: 16,
     fontWeight: "600",
+    fontStyle: "italic",
   },
 
   /* HOME */
@@ -1900,10 +2041,13 @@ const styles = StyleSheet.create({
     borderRadius: 4.5,
     backgroundColor: "#F4C430",
     marginRight: 9,
+    borderWidth: 1,
+    borderColor: "rgba(0, 0, 0, 0.25)",
   },
 
   updateCircleHidden: {
     backgroundColor: "transparent",
+    borderWidth: 0,
   },
 
   workbookName: {
@@ -2070,6 +2214,8 @@ const styles = StyleSheet.create({
     borderRadius: 7,
     marginRight: 10,
     flexShrink: 0,
+    borderWidth: 1,
+    borderColor: "rgba(0, 0, 0, 0.25)",
   },
 
   taskName: {
@@ -2210,6 +2356,73 @@ const styles = StyleSheet.create({
   historyPlaceholder: {
     fontSize: 15,
     lineHeight: 21,
+  },
+
+  /* WORKBOOK COLOR PICKER */
+
+  colorPickerBox: {
+    width: "100%",
+    maxWidth: 420,
+    borderRadius: 18,
+    padding: 22,
+  },
+
+  colorPickerTitle: {
+    fontSize: 20,
+    fontWeight: "700",
+    textAlign: "center",
+    marginBottom: 18,
+  },
+
+  colorPickerGrid: {
+    alignItems: "center",
+    gap: 10,
+    paddingHorizontal: 8,
+  },
+
+  colorPickerRow: {
+    flexDirection: "row",
+    justifyContent: "center",
+    gap: 14,
+  },
+
+  colorChoice: {
+    width: 42,
+    height: 42,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  colorCircle: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    borderWidth: 1,
+    borderColor: "rgba(0, 0, 0, 0.18)",
+  },
+
+  noColorCircle: {
+    backgroundColor: "transparent",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  noColorLine: {
+    position: "absolute",
+    width: 34,
+    height: 1.5,
+    transform: [{ rotate: "-45deg" }],
+  },
+
+  colorPickerCancel: {
+    alignSelf: "center",
+    minWidth: 90,
+    height: 42,
+    borderRadius: 21,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 16,
+    marginTop: 20,
   },
 
   /* MODALS */
