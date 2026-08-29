@@ -2,6 +2,10 @@ import React, { useMemo, useState } from "react";
 import { Ionicons } from "@expo/vector-icons";
 import {
   Alert,
+  Dimensions,
+  Keyboard,
+  KeyboardAvoidingView,
+  Platform,
   Pressable,
   SafeAreaView,
   ScrollView,
@@ -9,6 +13,7 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  TouchableWithoutFeedback,
   View,
   useColorScheme,
 } from "react-native";
@@ -22,6 +27,12 @@ type Task = {
   location?: string;
   description?: string;
   repetition?: string;
+  prewarning?: string;
+  repeatValue?: string;
+  repeatUnit?: "days" | "weeks" | "months" | "years";
+  reminderDate?: string;
+  reminderTime?: string;
+  reminderDaily?: boolean;
   status: TaskStatus;
 };
 
@@ -204,6 +215,73 @@ function formatTaskDate(date?: string) {
   }).format(parsed);
 }
 
+function calculateNextDue(
+  date?: string,
+  repeatValue?: string,
+  repeatUnit?: "days" | "weeks" | "months" | "years"
+) {
+  if (!date || !repeatValue) {
+    return "";
+  }
+
+  const amount = Number(repeatValue);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return "";
+  }
+
+  const parts = date.split("-").map(Number);
+  if (
+    parts.length !== 3 ||
+    parts.some((part) => !Number.isFinite(part))
+  ) {
+    return "";
+  }
+
+  const [year, month, day] = parts;
+  const nextDate = new Date(year, month - 1, day);
+
+  if (
+    nextDate.getFullYear() !== year ||
+    nextDate.getMonth() !== month - 1 ||
+    nextDate.getDate() !== day
+  ) {
+    return "";
+  }
+
+  if (repeatUnit === "days") {
+    nextDate.setDate(nextDate.getDate() + amount);
+  } else if (repeatUnit === "weeks") {
+    nextDate.setDate(nextDate.getDate() + amount * 7);
+  } else if (repeatUnit === "months") {
+    const originalDay = nextDate.getDate();
+    nextDate.setDate(1);
+    nextDate.setMonth(nextDate.getMonth() + amount);
+    const lastDay = new Date(
+      nextDate.getFullYear(),
+      nextDate.getMonth() + 1,
+      0
+    ).getDate();
+    nextDate.setDate(Math.min(originalDay, lastDay));
+  } else if (repeatUnit === "years") {
+    const originalMonth = nextDate.getMonth();
+    const originalDay = nextDate.getDate();
+    nextDate.setDate(1);
+    nextDate.setFullYear(nextDate.getFullYear() + amount);
+    nextDate.setMonth(originalMonth);
+    const lastDay = new Date(
+      nextDate.getFullYear(),
+      originalMonth + 1,
+      0
+    ).getDate();
+    nextDate.setDate(Math.min(originalDay, lastDay));
+  }
+
+  return nextDate.toLocaleDateString();
+}
+
+const FLOATING_WINDOW_MAX_HEIGHT =
+  Math.floor(Dimensions.get("window").height * 0.80);
+
 export default function App() {
   const systemScheme = useColorScheme();
 
@@ -248,6 +326,31 @@ export default function App() {
 
   const [newTaskLocation, setNewTaskLocation] =
     useState("");
+
+  const [newTaskPrewarning, setNewTaskPrewarning] = useState("");
+  const [newTaskRepeatValue, setNewTaskRepeatValue] = useState("");
+  const [newTaskRepeatUnit, setNewTaskRepeatUnit] =
+    useState<"days" | "weeks" | "months" | "years">("months");
+  const [newTaskReminderDate, setNewTaskReminderDate] = useState("");
+  const [newTaskReminderTime, setNewTaskReminderTime] = useState("");
+  const [newTaskReminderDaily, setNewTaskReminderDaily] = useState(false);
+  const [newTaskDescription, setNewTaskDescription] = useState("");
+  const [newTaskDescriptionHeight, setNewTaskDescriptionHeight] =
+    useState(72);
+
+  const [isEditingTask, setIsEditingTask] =
+    useState(false);
+  const [editTaskName, setEditTaskName] = useState("");
+  const [editTaskLocation, setEditTaskLocation] = useState("");
+  const [editTaskDate, setEditTaskDate] = useState("");
+  const [editTaskPrewarning, setEditTaskPrewarning] = useState("");
+  const [editTaskRepeatValue, setEditTaskRepeatValue] = useState("");
+  const [editTaskRepeatUnit, setEditTaskRepeatUnit] =
+    useState<"days" | "weeks" | "months" | "years">("months");
+  const [editTaskReminderDate, setEditTaskReminderDate] = useState("");
+  const [editTaskReminderTime, setEditTaskReminderTime] = useState("");
+  const [editTaskReminderDaily, setEditTaskReminderDaily] = useState(false);
+  const [editTaskDescription, setEditTaskDescription] = useState("");
 
   const [taskError, setTaskError] =
     useState("");
@@ -350,6 +453,87 @@ export default function App() {
 
   const openTask = (task: Task) => {
     setSelectedTaskId(task.id);
+    setIsEditingTask(false);
+    setEditTaskName(task.name);
+    setEditTaskLocation(task.location ?? "");
+    setEditTaskDate(task.date ?? "");
+    setEditTaskPrewarning(task.prewarning ?? "");
+    setEditTaskRepeatValue(task.repeatValue ?? "");
+    setEditTaskRepeatUnit(task.repeatUnit ?? "months");
+    setEditTaskReminderDate(task.reminderDate ?? "");
+    setEditTaskReminderTime(task.reminderTime ?? "");
+    setEditTaskReminderDaily(task.reminderDaily ?? false);
+    setEditTaskDescription(task.description ?? "");
+  };
+
+  const cancelTaskEdit = () => {
+    if (selectedTask) {
+      setEditTaskName(selectedTask.name);
+      setEditTaskLocation(selectedTask.location ?? "");
+      setEditTaskDate(selectedTask.date ?? "");
+      setEditTaskPrewarning(selectedTask.prewarning ?? "");
+      setEditTaskRepeatValue(selectedTask.repeatValue ?? "");
+      setEditTaskRepeatUnit(selectedTask.repeatUnit ?? "months");
+      setEditTaskReminderDate(selectedTask.reminderDate ?? "");
+      setEditTaskReminderTime(selectedTask.reminderTime ?? "");
+      setEditTaskReminderDaily(selectedTask.reminderDaily ?? false);
+      setEditTaskDescription(selectedTask.description ?? "");
+    }
+    setIsEditingTask(false);
+  };
+
+  const saveTaskEdit = () => {
+    if (!selectedWorkbookId || !selectedTaskId) {
+      return;
+    }
+
+    const name = editTaskName.trim();
+
+    if (!name) {
+      Alert.alert("Task name", "Task name is required.");
+      return;
+    }
+
+    setTasksByWorkbook((current) => ({
+      ...current,
+      [selectedWorkbookId]: (current[selectedWorkbookId] ?? []).map(
+        (task) =>
+          task.id === selectedTaskId
+            ? {
+                ...task,
+                name,
+                location: editTaskLocation.trim() || undefined,
+                date: editTaskDate.trim() || undefined,
+                prewarning: editTaskPrewarning.trim() || undefined,
+                repeatValue: editTaskRepeatValue.trim() || undefined,
+                repeatUnit:
+                  editTaskRepeatValue.trim()
+                    ? editTaskRepeatUnit
+                    : undefined,
+                reminderDate:
+                  editTaskReminderDate.trim() || undefined,
+                reminderTime:
+                  editTaskReminderTime.trim() || undefined,
+                reminderDaily:
+                  editTaskReminderDate.trim() ||
+                  editTaskReminderTime.trim()
+                    ? editTaskReminderDaily
+                    : undefined,
+                description:
+                  editTaskDescription.trim() || undefined,
+              }
+            : task
+      ),
+    }));
+
+    setIsEditingTask(false);
+  };
+
+  const openCompleteTask = () => {
+    Alert.alert(
+      "Complete",
+      "The completion window will be connected later."
+    );
   };
 
   const openSettings = () => {
@@ -415,6 +599,73 @@ export default function App() {
     setShowCreateWorkbook(false);
   };
 
+  const getNextDuePreview = () => {
+    if (!newTaskDate.trim() || !newTaskRepeatValue.trim()) return "";
+
+    const amount = Number(newTaskRepeatValue);
+    if (!Number.isFinite(amount) || amount <= 0) return "";
+
+    const parts = newTaskDate.split("-").map(Number);
+    if (parts.length !== 3 || parts.some((part) => !Number.isFinite(part))) {
+      return "";
+    }
+
+    const [year, month, day] = parts;
+    const nextDate = new Date(year, month - 1, day);
+    if (
+      nextDate.getFullYear() !== year ||
+      nextDate.getMonth() !== month - 1 ||
+      nextDate.getDate() !== day
+    ) {
+      return "";
+    }
+
+    if (newTaskRepeatUnit === "days") {
+      nextDate.setDate(nextDate.getDate() + amount);
+    } else if (newTaskRepeatUnit === "weeks") {
+      nextDate.setDate(nextDate.getDate() + amount * 7);
+    } else if (newTaskRepeatUnit === "months") {
+      const originalDay = nextDate.getDate();
+      nextDate.setDate(1);
+      nextDate.setMonth(nextDate.getMonth() + amount);
+      const lastDay = new Date(
+        nextDate.getFullYear(),
+        nextDate.getMonth() + 1,
+        0
+      ).getDate();
+      nextDate.setDate(Math.min(originalDay, lastDay));
+    } else {
+      const originalMonth = nextDate.getMonth();
+      const originalDay = nextDate.getDate();
+      nextDate.setDate(1);
+      nextDate.setFullYear(nextDate.getFullYear() + amount);
+      nextDate.setMonth(originalMonth);
+      const lastDay = new Date(
+        nextDate.getFullYear(),
+        originalMonth + 1,
+        0
+      ).getDate();
+      nextDate.setDate(Math.min(originalDay, lastDay));
+    }
+
+    return nextDate.toLocaleDateString();
+  };
+
+  const resetNewTaskForm = () => {
+    setNewTaskName("");
+    setNewTaskDate("");
+    setNewTaskLocation("");
+    setNewTaskPrewarning("");
+    setNewTaskRepeatValue("");
+    setNewTaskRepeatUnit("months");
+    setNewTaskReminderDate("");
+    setNewTaskReminderTime("");
+    setNewTaskReminderDaily(false);
+    setNewTaskDescription("");
+    setNewTaskDescriptionHeight(72);
+    setTaskError("");
+  };
+
   const createTask = () => {
     if (!selectedWorkbookId) {
       return;
@@ -449,6 +700,25 @@ export default function App() {
       date: newTaskDate.trim() || undefined,
       location:
         newTaskLocation.trim() || undefined,
+      prewarning:
+        newTaskPrewarning.trim() || undefined,
+      repeatValue:
+        newTaskRepeatValue.trim() || undefined,
+      repeatUnit:
+        newTaskRepeatValue.trim()
+          ? newTaskRepeatUnit
+          : undefined,
+      reminderDate:
+        newTaskReminderDate.trim() || undefined,
+      reminderTime:
+        newTaskReminderTime.trim() || undefined,
+      reminderDaily:
+        newTaskReminderDate.trim() ||
+        newTaskReminderTime.trim()
+          ? newTaskReminderDaily
+          : undefined,
+      description:
+        newTaskDescription.trim() || undefined,
       status: "orange",
     };
 
@@ -460,236 +730,507 @@ export default function App() {
       ],
     }));
 
-    setNewTaskName("");
-    setNewTaskDate("");
-    setNewTaskLocation("");
-    setTaskError("");
+    resetNewTaskForm();
     setShowCreateTask(false);
   };
 
-  /*
-   * TASK DETAILS
-   * The same permanent top bar is displayed here.
-   */
 
-  if (selectedTask && selectedWorkbook) {
-    return (
-      <SafeAreaView
-        style={[
-          styles.safeArea,
-          {
-            backgroundColor: colors.background,
-          },
-        ]}
-      >
-        <StatusBar
-          barStyle={
-            isDark
-              ? "light-content"
-              : "dark-content"
-          }
-        />
+  const renderTaskDetailsWindow = () => {
+    if (!selectedTask || !selectedWorkbook) {
+      return null;
+    }
 
-        <View
-          style={[
-            styles.topBar,
-            {
-              backgroundColor:
-                colors.topBar,
-              borderBottomColor:
-                colors.border,
-            },
-          ]}
-        >
-          <Pressable
-            style={[
-              styles.topIconButton,
-              {
-                backgroundColor: "transparent",
-              },
-            ]}
-            onPress={openSettings}
-          >
-            <Ionicons
-              name="settings-outline"
-              size={23}
-              color={colors.text}
-            />
-          </Pressable>
+    const displayName = isEditingTask
+      ? editTaskName
+      : selectedTask.name;
+    const displayLocation = isEditingTask
+      ? editTaskLocation
+      : selectedTask.location ?? "";
+    const displayDate = isEditingTask
+      ? editTaskDate
+      : selectedTask.date ?? "";
+    const displayPrewarning = isEditingTask
+      ? editTaskPrewarning
+      : selectedTask.prewarning ?? "";
+    const displayRepeatValue = isEditingTask
+      ? editTaskRepeatValue
+      : selectedTask.repeatValue ?? "";
+    const displayRepeatUnit = isEditingTask
+      ? editTaskRepeatUnit
+      : selectedTask.repeatUnit ?? "months";
+    const displayDescription = isEditingTask
+      ? editTaskDescription
+      : selectedTask.description ?? "";
+    const displayReminderDate = isEditingTask
+      ? editTaskReminderDate
+      : selectedTask.reminderDate ?? "";
+    const displayReminderTime = isEditingTask
+      ? editTaskReminderTime
+      : selectedTask.reminderTime ?? "";
+    const displayReminderDaily = isEditingTask
+      ? editTaskReminderDaily
+      : selectedTask.reminderDaily ?? false;
 
-          <Pressable
-            style={[
-              styles.topIconButton,
-              {
-                backgroundColor: "transparent",
-              },
-            ]}
-            onPress={goHome}
-          >
-            <Ionicons
-              name="home-outline"
-              size={22}
-              color={colors.text}
-            />
-          </Pressable>
-
-          <View style={styles.userArea}>
-            <Text
-              style={[
-                styles.userName,
-                {
-                  color: colors.text,
-                },
-              ]}
-            >
-              Nikolay Stanev
-            </Text>
-          </View>
-
-          <Pressable
-            style={[
-              styles.topIconButton,
-              {
-                backgroundColor: "transparent",
-              },
-            ]}
-            onPress={openSearch}
-          >
-            <Ionicons
-              name="search-outline"
-              size={22}
-             color={colors.text}
-            />
-          </Pressable>
-        </View>
-
-        <View
-          style={[
-            styles.detailsNavigation,
-            {
-              borderBottomColor:
-                colors.separator,
-            },
-          ]}
-        >
-          <Pressable
-            style={[
-              styles.detailsBackButton,
-              {
-                backgroundColor: "transparent",
-              },
-            ]}
-            onPress={goBackToWorkbook}
-          >
-            <Ionicons
-              name="arrow-back-outline"
-              size={23}
-              color={colors.text}
-            />
-          </Pressable>
-
-          <Text
-            style={[
-              styles.detailsNavigationTitle,
-              {
-                color: colors.text,
-              },
-            ]}
-            numberOfLines={1}
-          >
-            {selectedWorkbook.name}
-          </Text>
-        </View>
-
-        <ScrollView
-          contentContainerStyle={
-            styles.detailsContent
-          }
-          showsVerticalScrollIndicator={false}
-        >
-          <Text
-            style={[
-              styles.detailsTitle,
-              {
-                color: colors.text,
-              },
-            ]}
-          >
-            {selectedTask.name}
-          </Text>
-
-          <DetailSection
-            title="Location"
-            value={
-              selectedTask.location ??
-              "Unallocated"
-            }
-            colors={colors}
-            italic={!selectedTask.location}
-          />
-
-          <DetailSection
-            title="Due date"
-            value={formatTaskDate(
-              selectedTask.date
-            )}
-            colors={colors}
-          />
-
-          <DetailSection
-            title="Description"
-            value={
-              selectedTask.description ??
-              "No description"
-            }
-            colors={colors}
-          />
-
-          <DetailSection
-            title="Repetition"
-            value={
-              selectedTask.repetition ??
-              "No repetition"
-            }
-            colors={colors}
-          />
-
-          <View
-            style={[
-              styles.detailSection,
-              {
-                borderTopColor:
-                  colors.separator,
-              },
-            ]}
-          >
-            <Text
-              style={[
-                styles.detailSectionTitle,
-                {
-                  color: colors.text,
-                },
-              ]}
-            >
-              Completion History
-            </Text>
-
-            <Text
-              style={[
-                styles.historyPlaceholder,
-                {
-                  color:
-                    colors.secondaryText,
-                },
-              ]}
-            >
-              No completion history yet.
-            </Text>
-          </View>
-        </ScrollView>
-      </SafeAreaView>
+    const nextDue = calculateNextDue(
+      displayDate,
+      displayRepeatValue,
+      displayRepeatUnit
     );
-  }
+
+    const descriptionLines = Math.max(
+      1,
+      Math.ceil((displayDescription || "").length / 42)
+    );
+    const nameLines = Math.max(1, Math.ceil(displayName.length / 34));
+    const locationLines = Math.max(
+      1,
+      Math.ceil(displayLocation.length / 24)
+    );
+
+    const taskInformationHeight =
+      330 +
+      Math.max(nameLines - 1, 0) * 20 +
+      Math.max(locationLines - 1, 0) * 20 +
+      Math.min(descriptionLines, 10) * 20;
+
+    const readOnlyTaskWindowHeight = Math.min(
+      FLOATING_WINDOW_MAX_HEIGHT,
+      Math.max(390, taskInformationHeight)
+    );
+
+    return (
+      <View style={styles.modalOverlay}>
+        <KeyboardAvoidingView
+          style={styles.keyboardAvoidingContainer}
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+        >
+          <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+            <View
+              style={[
+                styles.createTaskBox,
+                styles.taskDetailsWindow,
+                {
+                  backgroundColor: colors.card,
+                  height: isEditingTask
+                    ? FLOATING_WINDOW_MAX_HEIGHT
+                    : readOnlyTaskWindowHeight,
+                },
+              ]}
+            >
+              <View
+                style={[
+                  styles.taskModalHeader,
+                  { borderBottomColor: colors.separator },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.createWorkbookTitle,
+                    {
+                      color: colors.text,
+                      marginBottom: 0,
+                    },
+                  ]}
+                >
+                  {isEditingTask ? "Edit Task" : "Task"}
+                </Text>
+
+                <Pressable
+                  style={[
+                    styles.completeButton,
+                    { backgroundColor: "#43A047" },
+                  ]}
+                  onPress={openCompleteTask}
+                >
+                  <Text style={styles.completeButtonText}>
+                    Complete
+                  </Text>
+                </Pressable>
+              </View>
+
+              <ScrollView
+                style={styles.taskDetailsScroll}
+                contentContainerStyle={styles.createTaskScrollContent}
+                keyboardShouldPersistTaps="handled"
+                keyboardDismissMode="interactive"
+                showsVerticalScrollIndicator={false}
+              >
+                {isEditingTask ? (
+                  <>
+                    <Text style={[styles.taskFieldLabel, { color: colors.secondaryText }]}>
+                      Task name *
+                    </Text>
+                    <TextInput
+                      style={[
+                        styles.workbookInput,
+                        {
+                          color: colors.text,
+                          borderColor: colors.border,
+                          backgroundColor: colors.inputBackground,
+                        },
+                      ]}
+                      value={editTaskName}
+                      onChangeText={setEditTaskName}
+                      returnKeyType="done"
+                      onSubmitEditing={() => Keyboard.dismiss()}
+                    />
+
+                    <Text style={[styles.taskFieldLabel, { color: colors.secondaryText }]}>
+                      Location
+                    </Text>
+                    <TextInput
+                      style={[
+                        styles.workbookInput,
+                        {
+                          color: colors.text,
+                          borderColor: colors.border,
+                          backgroundColor: colors.inputBackground,
+                        },
+                      ]}
+                      placeholder="Location (optional)"
+                      placeholderTextColor={colors.secondaryText}
+                      value={editTaskLocation}
+                      onChangeText={setEditTaskLocation}
+                      returnKeyType="done"
+                      onSubmitEditing={() => Keyboard.dismiss()}
+                    />
+
+                    <Text style={[styles.taskFieldLabel, { color: colors.secondaryText }]}>
+                      Due date
+                    </Text>
+                    <TextInput
+                      style={[
+                        styles.workbookInput,
+                        {
+                          color: colors.text,
+                          borderColor: colors.border,
+                          backgroundColor: colors.inputBackground,
+                        },
+                      ]}
+                      placeholder="YYYY-MM-DD (optional)"
+                      placeholderTextColor={colors.secondaryText}
+                      value={editTaskDate}
+                      onChangeText={setEditTaskDate}
+                      returnKeyType="done"
+                      onSubmitEditing={() => Keyboard.dismiss()}
+                    />
+
+                    {editTaskDate.trim() !== "" && (
+                      <>
+                        <Text style={[styles.taskFieldLabel, { color: colors.secondaryText }]}>
+                          Prewarning
+                        </Text>
+                        <View style={styles.inlineFieldRow}>
+                          <TextInput
+                            style={[
+                              styles.compactNumberInput,
+                              {
+                                color: colors.text,
+                                borderColor: colors.border,
+                                backgroundColor: colors.inputBackground,
+                              },
+                            ]}
+                            placeholder="1"
+                            placeholderTextColor={colors.secondaryText}
+                            value={editTaskPrewarning}
+                            onChangeText={setEditTaskPrewarning}
+                            keyboardType="number-pad"
+                          />
+                          <Text style={[styles.inlineFieldText, { color: colors.text }]}>
+                            days before due date
+                          </Text>
+                        </View>
+                      </>
+                    )}
+
+                    <Text style={[styles.taskFieldLabel, { color: colors.secondaryText }]}>
+                      Repeat interval
+                    </Text>
+                    <View style={styles.inlineFieldRow}>
+                      <TextInput
+                        style={[
+                          styles.compactNumberInput,
+                          {
+                            color: colors.text,
+                            borderColor: colors.border,
+                            backgroundColor: colors.inputBackground,
+                          },
+                        ]}
+                        placeholder="—"
+                        placeholderTextColor={colors.secondaryText}
+                        value={editTaskRepeatValue}
+                        onChangeText={setEditTaskRepeatValue}
+                        keyboardType="number-pad"
+                      />
+                      <View style={styles.repeatUnitRow}>
+                        {(["days", "weeks", "months", "years"] as const).map(
+                          (unit) => (
+                            <Pressable
+                              key={unit}
+                              style={[
+                                styles.repeatUnitButton,
+                                {
+                                  borderColor: colors.border,
+                                  backgroundColor:
+                                    editTaskRepeatUnit === unit
+                                      ? colors.iconBackground
+                                      : "transparent",
+                                },
+                              ]}
+                              onPress={() => setEditTaskRepeatUnit(unit)}
+                            >
+                              <Text style={[styles.repeatUnitText, { color: colors.text }]}>
+                                {unit}
+                              </Text>
+                            </Pressable>
+                          )
+                        )}
+                      </View>
+                    </View>
+
+                    <View style={styles.nextDueRow}>
+                      <Text style={[styles.nextDueLabel, { color: colors.secondaryText }]}>
+                        Next Due:
+                      </Text>
+                      <Text style={[styles.nextDueValue, { color: colors.text }]}>
+                        {nextDue}
+                      </Text>
+                    </View>
+
+                    <Text style={[styles.taskFieldLabel, { color: colors.secondaryText }]}>
+                      Description
+                    </Text>
+                    <TextInput
+                      style={[
+                        styles.workbookInput,
+                        styles.taskDescriptionInput,
+                        {
+                          color: colors.text,
+                          borderColor: colors.border,
+                          backgroundColor: colors.inputBackground,
+                          height: editTaskDescription ? 144 : 72,
+                        },
+                      ]}
+                      placeholder="Description (optional)"
+                      placeholderTextColor={colors.secondaryText}
+                      value={editTaskDescription}
+                      onChangeText={setEditTaskDescription}
+                      multiline
+                      scrollEnabled={true}
+                      textAlignVertical="top"
+                    />
+
+                    <Text style={[styles.taskFieldLabel, { color: colors.secondaryText }]}>
+                      Custom reminder
+                    </Text>
+                    <View style={styles.reminderRow}>
+                      <TextInput
+                        style={[
+                          styles.reminderDateInput,
+                          {
+                            color: colors.text,
+                            borderColor: colors.border,
+                            backgroundColor: colors.inputBackground,
+                          },
+                        ]}
+                        placeholder="YYYY-MM-DD"
+                        placeholderTextColor={colors.secondaryText}
+                        value={editTaskReminderDate}
+                        onChangeText={setEditTaskReminderDate}
+                      />
+                      <TextInput
+                        style={[
+                          styles.reminderTimeInput,
+                          {
+                            color: colors.text,
+                            borderColor: colors.border,
+                            backgroundColor: colors.inputBackground,
+                          },
+                        ]}
+                        placeholder="08:00"
+                        placeholderTextColor={colors.secondaryText}
+                        value={editTaskReminderTime}
+                        onChangeText={setEditTaskReminderTime}
+                      />
+                      <Pressable
+                        style={styles.dailyToggle}
+                        onPress={() =>
+                          setEditTaskReminderDaily((current) => !current)
+                        }
+                      >
+                        <Ionicons
+                          name={
+                            editTaskReminderDaily
+                              ? "checkbox-outline"
+                              : "square-outline"
+                          }
+                          size={22}
+                          color={colors.text}
+                        />
+                        <Text style={[styles.dailyToggleText, { color: colors.text }]}>
+                          Daily
+                        </Text>
+                      </Pressable>
+                    </View>
+                  </>
+                ) : (
+                  <>
+                    <View style={styles.taskInfoRow}>
+                      <View style={styles.taskInfoColumn}>
+                        <Text style={[styles.taskInfoLabel, { color: colors.secondaryText }]}>
+                          Name
+                        </Text>
+                        <Text
+                          style={[styles.taskInfoValue, { color: colors.text }]}
+                        >
+                          {displayName}
+                        </Text>
+                      </View>
+
+                      <View style={styles.taskInfoColumn}>
+                        <Text style={[styles.taskInfoLabel, { color: colors.secondaryText }]}>
+                          Location
+                        </Text>
+                        <Text
+                          style={[
+                            styles.taskInfoValue,
+                            {
+                              color: displayLocation
+                                ? colors.text
+                                : colors.secondaryText,
+                            },
+                          ]}
+                        >
+                          {displayLocation || "not defined"}
+                        </Text>
+                      </View>
+                    </View>
+
+                    <View style={styles.taskInfoRow}>
+                      <View style={styles.taskInfoColumn}>
+                        <Text style={[styles.taskInfoLabel, { color: colors.secondaryText }]}>
+                          Due date
+                        </Text>
+                        <Text style={[styles.taskInfoValue, { color: colors.text }]}>
+                          {displayDate
+                            ? formatTaskDate(displayDate)
+                            : "not defined"}
+                        </Text>
+                      </View>
+
+                      <View style={styles.taskInfoColumn}>
+                        <Text style={[styles.taskInfoLabel, { color: colors.secondaryText }]}>
+                          Prewarning
+                        </Text>
+                        <Text style={[styles.taskInfoValue, { color: colors.text }]}>
+                          {displayPrewarning
+                            ? `${displayPrewarning} days`
+                            : "not defined"}
+                        </Text>
+                      </View>
+                    </View>
+
+                    <View style={styles.taskInfoRow}>
+                      <View style={styles.taskInfoColumn}>
+                        <Text style={[styles.taskInfoLabel, { color: colors.secondaryText }]}>
+                          Next Due
+                        </Text>
+                        <Text style={[styles.taskInfoValue, { color: colors.text }]}>
+                          {nextDue || "not defined"}
+                        </Text>
+                      </View>
+
+                      <View style={styles.taskInfoColumn}>
+                        <Text style={[styles.taskInfoLabel, { color: colors.secondaryText }]}>
+                          Repeat interval
+                        </Text>
+                        <Text style={[styles.taskInfoValue, { color: colors.text }]}>
+                          {displayRepeatValue
+                            ? `${displayRepeatValue} ${displayRepeatUnit}`
+                            : "not defined"}
+                        </Text>
+                      </View>
+                    </View>
+
+                    <View style={styles.taskInfoFullBlock}>
+                      <Text style={[styles.taskInfoLabel, { color: colors.secondaryText }]}>
+                        Description
+                      </Text>
+                      <Text style={[styles.taskInfoValue, { color: colors.text }]}>
+                        {displayDescription || "not defined"}
+                      </Text>
+                    </View>
+
+                    <View style={styles.taskInfoFullBlock}>
+                      <Text style={[styles.taskInfoLabel, { color: colors.secondaryText }]}>
+                        Custom reminder
+                      </Text>
+                      <Text style={[styles.taskInfoValue, { color: colors.text }]}>
+                        {displayReminderDate || displayReminderTime
+                          ? `${displayReminderDate || "—"}${
+                              displayReminderTime
+                                ? ` ${displayReminderTime}`
+                                : ""
+                            }${
+                              displayReminderDaily
+                                ? " · Daily"
+                                : ""
+                            }`
+                          : "not defined"}
+                      </Text>
+                    </View>
+                  </>
+                )}
+              </ScrollView>
+
+              <View
+                style={[
+                  styles.taskModalFooter,
+                  { borderTopColor: colors.separator },
+                ]}
+              >
+                <View style={styles.taskModalButtons}>
+                  <Pressable
+                  style={[
+                    styles.modalButton,
+                    { backgroundColor: colors.iconBackground },
+                  ]}
+                  onPress={() => {
+                    if (isEditingTask) {
+                      cancelTaskEdit();
+                    } else {
+                      goBackToWorkbook();
+                    }
+                  }}
+                >
+                  <Text style={[styles.modalButtonText, { color: colors.text }]}>
+                    Cancel
+                  </Text>
+                </Pressable>
+
+                <Pressable
+                  style={[styles.modalButton, styles.createButton]}
+                  onPress={() => {
+                    if (isEditingTask) {
+                      saveTaskEdit();
+                    } else {
+                      setIsEditingTask(true);
+                    }
+                  }}
+                >
+                  <Text style={styles.createButtonText}>
+                    {isEditingTask ? "Save" : "Edit"}
+                  </Text>
+                </Pressable>
+                </View>
+              </View>
+            </View>
+          </TouchableWithoutFeedback>
+        </KeyboardAvoidingView>
+      </View>
+    );
+  };
+
 
   return (
     <SafeAreaView
@@ -1601,171 +2142,332 @@ export default function App() {
 
       {showCreateTask &&
         selectedWorkbook && (
-          <View
-            style={
-              styles.modalOverlay
-            }
-          >
-            <View
-              style={[
-                styles.createWorkbookBox,
-                {
-                  backgroundColor:
-                    colors.card,
-                },
-              ]}
+          <View style={styles.modalOverlay}>
+            <KeyboardAvoidingView
+              style={styles.keyboardAvoidingContainer}
+              behavior={Platform.OS === "ios" ? "padding" : "height"}
             >
-              <Text
-                style={[
-                  styles.createWorkbookTitle,
-                  {
-                    color:
-                      colors.text,
-                  },
-                ]}
-              >
-                New Task
-              </Text>
+              <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+                <View
+                  style={[
+                    styles.createTaskBox,
+                    {
+                      backgroundColor: colors.card,
+                      height: FLOATING_WINDOW_MAX_HEIGHT,
+                    },
+                  ]}
+                >
+                  <View
+                    style={[
+                      styles.taskModalHeader,
+                      { borderBottomColor: colors.separator },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.createWorkbookTitle,
+                        {
+                          color: colors.text,
+                          marginBottom: 0,
+                        },
+                      ]}
+                    >
+                      New Task
+                    </Text>
+                  </View>
 
+                  <ScrollView
+                    style={styles.createTaskScroll}
+                    contentContainerStyle={styles.createTaskScrollContent}
+                    keyboardShouldPersistTaps="handled"
+                    keyboardDismissMode="interactive"
+                    showsVerticalScrollIndicator={false}
+                  >
+
+              <Text style={[styles.taskFieldLabel, { color: colors.secondaryText }]}>
+                Task name *
+              </Text>
               <TextInput
                 style={[
                   styles.workbookInput,
                   {
-                    color:
-                      colors.text,
-                    borderColor:
-                      colors.border,
-                    backgroundColor:
-                      colors.inputBackground,
+                    color: colors.text,
+                    borderColor: colors.border,
+                    backgroundColor: colors.inputBackground,
                   },
                 ]}
                 placeholder="Task name"
-                placeholderTextColor={
-                  colors.secondaryText
-                }
+                placeholderTextColor={colors.secondaryText}
                 value={newTaskName}
-                onChangeText={(text) => {
-                  setNewTaskName(text);
+                onChangeText={(value) => {
+                  setNewTaskName(value);
                   setTaskError("");
                 }}
-                autoFocus
+                returnKeyType="done"
+                onSubmitEditing={() => Keyboard.dismiss()}
               />
 
               {taskError !== "" && (
-                <Text
-                  style={[
-                    styles.errorText,
-                    {
-                      color:
-                        colors.error,
-                    },
-                  ]}
-                >
+                <Text style={[styles.errorText, { color: colors.error }]}>
                   {taskError}
                 </Text>
               )}
 
+              <Text style={[styles.taskFieldLabel, { color: colors.secondaryText }]}>
+                Location
+              </Text>
               <TextInput
                 style={[
                   styles.workbookInput,
-                  styles.additionalInput,
                   {
-                    color:
-                      colors.text,
-                    borderColor:
-                      colors.border,
-                    backgroundColor:
-                      colors.inputBackground,
-                  },
-                ]}
-                placeholder="Due date (optional)"
-                placeholderTextColor={
-                  colors.secondaryText
-                }
-                value={newTaskDate}
-                onChangeText={
-                  setNewTaskDate
-                }
-              />
-
-              <TextInput
-                style={[
-                  styles.workbookInput,
-                  styles.additionalInput,
-                  {
-                    color:
-                      colors.text,
-                    borderColor:
-                      colors.border,
-                    backgroundColor:
-                      colors.inputBackground,
+                    color: colors.text,
+                    borderColor: colors.border,
+                    backgroundColor: colors.inputBackground,
                   },
                 ]}
                 placeholder="Location (optional)"
-                placeholderTextColor={
-                  colors.secondaryText
-                }
+                placeholderTextColor={colors.secondaryText}
                 value={newTaskLocation}
-                onChangeText={
-                  setNewTaskLocation
-                }
+                onChangeText={setNewTaskLocation}
+                returnKeyType="done"
+                onSubmitEditing={() => Keyboard.dismiss()}
               />
 
-              <View
-                style={
-                  styles.modalButtons
-                }
-              >
-                <Pressable
+              <Text style={[styles.taskFieldLabel, { color: colors.secondaryText }]}>
+                Due date
+              </Text>
+              <TextInput
+                style={[
+                  styles.workbookInput,
+                  {
+                    color: colors.text,
+                    borderColor: colors.border,
+                    backgroundColor: colors.inputBackground,
+                  },
+                ]}
+                placeholder="YYYY-MM-DD (optional)"
+                placeholderTextColor={colors.secondaryText}
+                value={newTaskDate}
+                onChangeText={setNewTaskDate}
+                returnKeyType="done"
+                onSubmitEditing={() => Keyboard.dismiss()}
+              />
+
+              {newTaskDate.trim() !== "" && (
+                <>
+                  <Text style={[styles.taskFieldLabel, { color: colors.secondaryText }]}>
+                    Prewarning
+                  </Text>
+                  <View style={styles.inlineFieldRow}>
+                    <TextInput
+                      style={[
+                        styles.compactNumberInput,
+                        {
+                          color: colors.text,
+                          borderColor: colors.border,
+                          backgroundColor: colors.inputBackground,
+                        },
+                      ]}
+                      placeholder="1"
+                      placeholderTextColor={colors.secondaryText}
+                      value={newTaskPrewarning}
+                      onChangeText={setNewTaskPrewarning}
+                      keyboardType="number-pad"
+                    />
+                    <Text style={[styles.inlineFieldText, { color: colors.text }]}>
+                      days before due date
+                    </Text>
+                  </View>
+                </>
+              )}
+
+              <Text style={[styles.taskFieldLabel, { color: colors.secondaryText }]}>
+                Repeat interval
+              </Text>
+              <View style={styles.inlineFieldRow}>
+                <TextInput
                   style={[
-                    styles.modalButton,
+                    styles.compactNumberInput,
                     {
-                      backgroundColor:
-                        colors.iconBackground,
+                      color: colors.text,
+                      borderColor: colors.border,
+                      backgroundColor: colors.inputBackground,
                     },
                   ]}
+                  placeholder="—"
+                  placeholderTextColor={colors.secondaryText}
+                  value={newTaskRepeatValue}
+                  onChangeText={setNewTaskRepeatValue}
+                  keyboardType="number-pad"
+                />
+                <View style={styles.repeatUnitRow}>
+                  {(["days", "weeks", "months", "years"] as const).map((unit) => (
+                    <Pressable
+                      key={unit}
+                      style={[
+                        styles.repeatUnitButton,
+                        {
+                          borderColor: colors.border,
+                          backgroundColor:
+                            newTaskRepeatUnit === unit
+                              ? colors.iconBackground
+                              : "transparent",
+                        },
+                      ]}
+                      onPress={() => setNewTaskRepeatUnit(unit)}
+                    >
+                      <Text style={[styles.repeatUnitText, { color: colors.text }]}>
+                        {unit}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+              </View>
+
+              <View style={styles.nextDueRow}>
+                <Text style={[styles.nextDueLabel, { color: colors.secondaryText }]}>
+                  Next Due:
+                </Text>
+                <Text style={[styles.nextDueValue, { color: colors.text }]}>
+                  {getNextDuePreview()}
+                </Text>
+              </View>
+
+              <Text style={[styles.taskFieldLabel, { color: colors.secondaryText }]}>
+                Description
+              </Text>
+              <TextInput
+                style={[
+                  styles.workbookInput,
+                  styles.taskDescriptionInput,
+                  {
+                    color: colors.text,
+                    borderColor: colors.border,
+                    backgroundColor: colors.inputBackground,
+                    height: newTaskDescription
+                      ? newTaskDescriptionHeight
+                      : 72,
+                  },
+                ]}
+                placeholder="Description (optional)"
+                placeholderTextColor={colors.secondaryText}
+                value={newTaskDescription}
+                onChangeText={setNewTaskDescription}
+                multiline
+                scrollEnabled={false}
+                textAlignVertical="top"
+                onContentSizeChange={(event) => {
+                  const contentHeight =
+                    Math.ceil(event.nativeEvent.contentSize.height);
+
+                  if (newTaskDescription.length === 0) {
+                    setNewTaskDescriptionHeight(72);
+                    return;
+                  }
+
+                  // iOS can briefly report the whole parent height for a
+                  // multiline TextInput. Ignore that oversized measurement.
+                  if (contentHeight >= 72 && contentHeight <= 500) {
+                    setNewTaskDescriptionHeight(
+                      Math.max(72, contentHeight + 18)
+                    );
+                  }
+                }}
+              />
+
+              <Text style={[styles.taskFieldLabel, { color: colors.secondaryText }]}>
+                Custom reminder
+              </Text>
+              <View style={styles.reminderRow}>
+                <TextInput
+                  style={[
+                    styles.reminderDateInput,
+                    {
+                      color: colors.text,
+                      borderColor: colors.border,
+                      backgroundColor: colors.inputBackground,
+                    },
+                  ]}
+                  placeholder="YYYY-MM-DD"
+                  placeholderTextColor={colors.secondaryText}
+                  value={newTaskReminderDate}
+                  onChangeText={setNewTaskReminderDate}
+                />
+                <TextInput
+                  style={[
+                    styles.reminderTimeInput,
+                    {
+                      color: colors.text,
+                      borderColor: colors.border,
+                      backgroundColor: colors.inputBackground,
+                    },
+                  ]}
+                  placeholder="08:00"
+                  placeholderTextColor={colors.secondaryText}
+                  value={newTaskReminderTime}
+                  onChangeText={setNewTaskReminderTime}
+                />
+                <Pressable
+                  style={styles.dailyToggle}
+                  onPress={() =>
+                    setNewTaskReminderDaily((current) => !current)
+                  }
+                >
+                  <Ionicons
+                    name={
+                      newTaskReminderDaily
+                        ? "checkbox-outline"
+                        : "square-outline"
+                    }
+                    size={22}
+                    color={colors.text}
+                  />
+                  <Text style={[styles.dailyToggleText, { color: colors.text }]}>
+                    Daily
+                  </Text>
+                </Pressable>
+              </View>
+
+                  </ScrollView>
+
+                  <View
+                    style={[
+                      styles.createTaskFooter,
+                      { borderTopColor: colors.separator },
+                    ]}
+                  >
+                    <View style={styles.taskModalButtons}>
+                      <Pressable
+                  style={[
+                    styles.modalButton,
+                    { backgroundColor: colors.iconBackground },
+                  ]}
                   onPress={() => {
-                    setNewTaskName("");
-                    setNewTaskDate("");
-                    setNewTaskLocation("");
-                    setTaskError("");
+                    resetNewTaskForm();
                     setShowCreateTask(false);
                   }}
                 >
-                  <Text
-                    style={[
-                      styles.modalButtonText,
-                      {
-                        color:
-                          colors.text,
-                      },
-                    ]}
-                  >
+                  <Text style={[styles.modalButtonText, { color: colors.text }]}>
                     Cancel
                   </Text>
                 </Pressable>
 
                 <Pressable
-                  style={[
-                    styles.modalButton,
-                    styles.createButton,
-                  ]}
-                  onPress={
-                    createTask
-                  }
+                  style={[styles.modalButton, styles.createButton]}
+                  onPress={createTask}
                 >
-                  <Text
-                    style={
-                      styles.createButtonText
-                    }
-                  >
-                    Create
-                  </Text>
-                </Pressable>
-              </View>
-            </View>
+                  <Text style={styles.createButtonText}>Save</Text>
+                    </Pressable>
+                    </View>
+                  </View>
+                </View>
+              </TouchableWithoutFeedback>
+            </KeyboardAvoidingView>
           </View>
         )}
+      {selectedTask &&
+        selectedWorkbook &&
+        renderTaskDetailsWindow()}
     </SafeAreaView>
   );
 }
@@ -2331,6 +3033,72 @@ const styles = StyleSheet.create({
     marginBottom: 14,
   },
 
+  taskDetailsHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 14,
+    gap: 10,
+  },
+
+  completeButton: {
+    minWidth: 88,
+    height: 40,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 16,
+  },
+
+  completeButtonText: {
+    color: "#FFFFFF",
+    fontSize: 13,
+    fontWeight: "600",
+  },
+
+  taskDetailsBottomButtons: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginTop: 18,
+    paddingBottom: 10,
+  },
+
+  taskModalHeader: {
+    minHeight: 40,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    paddingBottom: 5,
+    marginBottom: 2,
+  },
+
+  taskInfoRow: {
+    flexDirection: "row",
+    gap: 14,
+    paddingVertical: 4,
+  },
+
+  taskInfoColumn: {
+    flex: 1,
+    minWidth: 0,
+  },
+
+  taskInfoFullBlock: {
+    paddingVertical: 4,
+  },
+
+  taskInfoLabel: {
+    fontSize: 12,
+    fontWeight: "600",
+    marginBottom: 2,
+  },
+
+  taskInfoValue: {
+    fontSize: 15,
+    lineHeight: 20,
+  },
+
   detailSection: {
     borderTopWidth:
       StyleSheet.hairlineWidth,
@@ -2425,6 +3193,183 @@ const styles = StyleSheet.create({
     marginTop: 20,
   },
 
+  /* CREATE TASK FORM */
+
+  keyboardAvoidingContainer: {
+    width: "100%",
+    alignItems: "center",
+    justifyContent: "center",
+    maxHeight: FLOATING_WINDOW_MAX_HEIGHT,
+  },
+
+  taskDetailsWindow: {
+    width: "100%",
+    maxWidth: 500,
+    maxHeight: FLOATING_WINDOW_MAX_HEIGHT,
+    borderRadius: 18,
+    paddingHorizontal: 18,
+    paddingTop: 10,
+    paddingBottom: 7,
+    flexDirection: "column",
+    flexShrink: 1,
+  },
+
+  createTaskBox: {
+    width: "100%",
+    maxWidth: 500,
+    maxHeight: FLOATING_WINDOW_MAX_HEIGHT,
+    borderRadius: 18,
+    paddingHorizontal: 18,
+    paddingTop: 10,
+    paddingBottom: 7,
+    flexDirection: "column",
+  },
+
+  createTaskScroll: {
+    width: "100%",
+    flex: 1,
+    minHeight: 0,
+  },
+
+  taskDetailsScroll: {
+    width: "100%",
+    flex: 1,
+    minHeight: 0,
+  },
+
+  createTaskScrollContent: {
+    paddingTop: 2,
+    paddingBottom: 62,
+  },
+
+  taskFieldLabel: {
+    fontSize: 12,
+    fontWeight: "600",
+    marginTop: 8,
+    marginBottom: 4,
+  },
+
+  inlineFieldRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7,
+  },
+
+  compactNumberInput: {
+    width: 54,
+    height: 40,
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 9,
+    fontSize: 13,
+  },
+
+  inlineFieldText: {
+    fontSize: 12,
+  },
+
+  repeatUnitRow: {
+    flex: 1,
+    flexDirection: "row",
+    gap: 4,
+  },
+
+  repeatUnitButton: {
+    flex: 1,
+    height: 40,
+    borderWidth: 1,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 2,
+  },
+
+  repeatUnitText: {
+    fontSize: 10,
+    textTransform: "capitalize",
+  },
+
+  nextDueRow: {
+    minHeight: 30,
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 3,
+  },
+
+  nextDueLabel: {
+    fontSize: 12,
+    fontWeight: "600",
+    marginRight: 6,
+  },
+
+  nextDueValue: {
+    fontSize: 12,
+    fontWeight: "700",
+  },
+
+  reminderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+
+  reminderDateInput: {
+    flex: 1.4,
+    height: 40,
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 8,
+    fontSize: 11,
+  },
+
+  reminderTimeInput: {
+    flex: 0.75,
+    height: 40,
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 8,
+    fontSize: 11,
+  },
+
+  dailyToggle: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+    minHeight: 40,
+  },
+
+  dailyToggleText: {
+    fontSize: 11,
+  },
+
+  taskDescriptionInput: {
+    paddingTop: 9,
+  },
+
+  taskModalFooter: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    paddingTop: 5,
+    marginTop: 2,
+  },
+
+  createTaskFooter: {
+    position: "absolute",
+    left: 18,
+    right: 18,
+    bottom: 7,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    paddingTop: 5,
+    backgroundColor: "transparent",
+    zIndex: 10,
+  },
+
+  taskModalButtons: {
+    height: 43,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+
   /* MODALS */
 
   modalOverlay: {
@@ -2438,6 +3383,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     padding: 20,
+ 
+    zIndex: 100,
+    elevation: 100,
   },
 
   createWorkbookBox: {
@@ -2481,7 +3429,7 @@ const styles = StyleSheet.create({
   modalButton: {
     minWidth: 90,
     height: 42,
-    borderRadius: 21,
+    borderRadius: 10,
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: 16,
