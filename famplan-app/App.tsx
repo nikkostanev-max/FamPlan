@@ -360,6 +360,14 @@ export default function App() {
     useState(false);
   const [showTaskHistory, setShowTaskHistory] =
     useState(false);
+  const [showCompleteTask, setShowCompleteTask] =
+    useState(false);
+  const [completionDate, setCompletionDate] =
+    useState("");
+  const [completionReport, setCompletionReport] =
+    useState("");
+  const [completionDateError, setCompletionDateError] =
+    useState("");
   const [editTaskName, setEditTaskName] = useState("");
   const [editTaskLocation, setEditTaskLocation] = useState("");
   const [editTaskDate, setEditTaskDate] = useState("");
@@ -550,10 +558,129 @@ export default function App() {
   };
 
   const openCompleteTask = () => {
-    Alert.alert(
-      "Complete",
-      "The completion window will be connected later."
+    setCompletionDate(
+      new Date().toISOString().slice(0, 10)
     );
+    setCompletionReport("");
+    setCompletionDateError("");
+    setShowCompleteTask(true);
+  };
+
+  const validateCompletionDate = () => {
+    const value = completionDate.trim();
+
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+      setCompletionDateError(
+        "Enter a valid date in YYYY-MM-DD format."
+      );
+      return false;
+    }
+
+    const [year, month, day] = value
+      .split("-")
+      .map(Number);
+
+    const enteredDate = new Date(
+      year,
+      month - 1,
+      day
+    );
+
+    if (
+      enteredDate.getFullYear() !== year ||
+      enteredDate.getMonth() !== month - 1 ||
+      enteredDate.getDate() !== day
+    ) {
+      setCompletionDateError("Enter a valid date.");
+      return false;
+    }
+
+    const now = new Date();
+    const today = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate()
+    );
+
+    if (enteredDate > today) {
+      setCompletionDateError(
+        "Date of completion cannot be in the future."
+      );
+      return false;
+    }
+
+    setCompletionDateError("");
+    return true;
+  };
+
+  const completeSelectedTask = () => {
+    if (!selectedWorkbookId || !selectedTaskId || !selectedTask) {
+      return;
+    }
+
+    if (!validateCompletionDate()) {
+      return;
+    }
+
+    const completionDateValue = completionDate.trim();
+    const completionRecord: TaskHistoryRecord = {
+      date: completionDateValue,
+      report: completionReport.trim(),
+    };
+
+    const repeatValue = selectedTask.repeatValue?.trim() ?? "";
+    const repeatUnit = selectedTask.repeatUnit;
+    const nextDue = calculateNextDue(
+      completionDateValue,
+      repeatValue,
+      repeatUnit
+    );
+
+    const isRepeating =
+      repeatValue !== "" &&
+      !!repeatUnit &&
+      nextDue !== "";
+
+    if (isRepeating) {
+      const newTaskId = Date.now().toString();
+      const newTask: Task = {
+        ...selectedTask,
+        id: newTaskId,
+        date: nextDue,
+        history: [
+          ...(selectedTask.history ?? []),
+          completionRecord,
+        ],
+      };
+
+      setTasksByWorkbook((current) => ({
+        ...current,
+        [selectedWorkbookId]: [
+          ...(current[selectedWorkbookId] ?? [])
+            .filter((task) => task.id !== selectedTaskId),
+          newTask,
+        ],
+      }));
+
+      setSelectedTaskId(newTaskId);
+    } else {
+      setTasksByWorkbook((current) => ({
+        ...current,
+        [selectedWorkbookId]: (
+          current[selectedWorkbookId] ?? []
+        ).filter((task) => task.id !== selectedTaskId),
+      }));
+
+      setSelectedTaskId(null);
+    }
+
+    setShowCompleteTask(false);
+    setIsEditingTask(false);
+    setSelectedTaskId(null);
+  };
+
+  const closeCompleteTask = () => {
+    setShowCompleteTask(false);
   };
 
   const openTaskHistory = () => {
@@ -2473,6 +2600,259 @@ export default function App() {
         renderTaskDetailsWindow()}
 
 
+      {showCompleteTask &&
+        selectedTask &&
+        selectedWorkbook && (
+          <View style={styles.modalOverlay}>
+            <KeyboardAvoidingView
+              style={styles.keyboardAvoidingContainer}
+              behavior={Platform.OS === "ios" ? "padding" : "height"}
+            >
+              <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+                <View
+                  style={[
+                    styles.createTaskBox,
+                    styles.completeTaskWindow,
+                    {
+                      backgroundColor: colors.card,
+                      height: Math.min(
+                        FLOATING_WINDOW_MAX_HEIGHT,
+                        500
+                      ),
+                    },
+                  ]}
+                >
+                  <View
+                    style={[
+                      styles.taskModalHeader,
+                      { borderBottomColor: colors.separator },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.createWorkbookTitle,
+                        {
+                          color: colors.text,
+                          marginBottom: 0,
+                        },
+                      ]}
+                    >
+                      Complete Task
+                    </Text>
+
+                    <Pressable
+                      style={styles.taskCloseButtonSmall}
+                      onPress={closeCompleteTask}
+                    >
+                      <Ionicons
+                        name="close"
+                        size={18}
+                        color="#FFFFFF"
+                      />
+                    </Pressable>
+                  </View>
+
+                  <ScrollView
+                    style={styles.completeTaskScroll}
+                    contentContainerStyle={
+                      styles.completeTaskScrollContent
+                    }
+                    keyboardShouldPersistTaps="handled"
+                    showsVerticalScrollIndicator={false}
+                  >
+                    <View style={styles.completeTaskField}>
+                      <Text
+                        style={[
+                          styles.taskInfoLabel,
+                          { color: colors.secondaryText },
+                        ]}
+                      >
+                        Name
+                      </Text>
+                      <Text
+                        style={[
+                          styles.taskInfoValue,
+                          { color: colors.text },
+                        ]}
+                      >
+                        {selectedTask.name}
+                      </Text>
+                    </View>
+
+                    <View style={styles.completeTaskField}>
+                      <Text
+                        style={[
+                          styles.taskInfoLabel,
+                          { color: colors.secondaryText },
+                        ]}
+                      >
+                        Date of completion
+                      </Text>
+                      <TextInput
+                        style={[
+                          styles.workbookInput,
+                          styles.additionalInput,
+                          {
+                            color: colors.text,
+                            borderColor: colors.border,
+                            backgroundColor:
+                              colors.inputBackground,
+                          },
+                        ]}
+                        placeholder="YYYY-MM-DD"
+                        placeholderTextColor={
+                          colors.secondaryText
+                        }
+                        value={completionDate}
+                        onChangeText={(value) => {
+                          setCompletionDate(value);
+                          if (completionDateError) {
+                            setCompletionDateError("");
+                          }
+                        }}
+                        returnKeyType="done"
+                        onSubmitEditing={() =>
+                          Keyboard.dismiss()
+                        }
+                      />
+                      {completionDateError ? (
+                        <Text
+                          style={[
+                            styles.completionDateError,
+                            { color: colors.error },
+                          ]}
+                        >
+                          {completionDateError}
+                        </Text>
+                      ) : null}
+                    </View>
+
+                    <View style={styles.completeTaskRow}>
+                      <View style={styles.completeTaskColumn}>
+                        <Text
+                          style={[
+                            styles.taskInfoLabel,
+                            { color: colors.secondaryText },
+                          ]}
+                        >
+                          Next due
+                        </Text>
+                        <Text
+                          style={[
+                            styles.taskInfoValue,
+                            { color: colors.text },
+                          ]}
+                        >
+                          {calculateNextDue(
+                            completionDate,
+                            selectedTask.repeatValue ?? "",
+                            selectedTask.repeatUnit ?? "months"
+                          ) || "not defined"}
+                        </Text>
+                      </View>
+
+                      <View style={styles.completeTaskColumn}>
+                        <Text
+                          style={[
+                            styles.taskInfoLabel,
+                            { color: colors.secondaryText },
+                          ]}
+                        >
+                          Repeat interval
+                        </Text>
+                        <Text
+                          style={[
+                            styles.taskInfoValue,
+                            { color: colors.text },
+                          ]}
+                        >
+                          {selectedTask.repeatValue
+                            ? `${selectedTask.repeatValue} ${
+                                selectedTask.repeatUnit ?? ""
+                              }`
+                            : "not defined"}
+                        </Text>
+                      </View>
+                    </View>
+
+                    <View style={styles.completeTaskField}>
+                      <Text
+                        style={[
+                          styles.taskInfoLabel,
+                          { color: colors.secondaryText },
+                        ]}
+                      >
+                        Report
+                      </Text>
+                      <TextInput
+                        style={[
+                          styles.workbookInput,
+                          styles.taskDescriptionInput,
+                          {
+                            color: colors.text,
+                            borderColor: colors.border,
+                            backgroundColor:
+                              colors.inputBackground,
+                            height:
+                              completionReport.length > 0
+                                ? 144
+                                : 72,
+                          },
+                        ]}
+                        placeholder="Report (optional)"
+                        placeholderTextColor={
+                          colors.secondaryText
+                        }
+                        value={completionReport}
+                        onChangeText={setCompletionReport}
+                        multiline
+                        scrollEnabled={
+                          completionReport.length > 0
+                        }
+                        textAlignVertical="top"
+                        returnKeyType="default"
+                      />
+                    </View>
+                  </ScrollView>
+
+                  <View
+                    style={[
+                      styles.taskModalFooter,
+                      { borderTopColor: colors.separator },
+                    ]}
+                  >
+                    <View
+                      style={[
+                        styles.taskModalButtons,
+                        {
+                          justifyContent: "flex-end",
+                        },
+                      ]}
+                    >
+                      <Pressable
+                        style={[
+                          styles.modalButton,
+                          styles.completeButton,
+                          { backgroundColor: "#43A047" },
+                        ]}
+                        onPress={completeSelectedTask}
+                      >
+                        <Text
+                          style={styles.completeButtonText}
+                        >
+                          Complete
+                        </Text>
+                      </Pressable>
+                    </View>
+                  </View>
+                </View>
+              </TouchableWithoutFeedback>
+            </KeyboardAvoidingView>
+          </View>
+        )}
+
+
+
       {showTaskHistory &&
         selectedTask &&
         selectedWorkbook && (
@@ -3340,6 +3720,47 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     maxHeight: FLOATING_WINDOW_MAX_HEIGHT,
+  },
+
+  completeTaskWindow: {
+    width: "100%",
+    maxWidth: 500,
+    maxHeight: FLOATING_WINDOW_MAX_HEIGHT,
+    borderRadius: 18,
+    paddingHorizontal: 18,
+    paddingTop: 10,
+    paddingBottom: 7,
+    flexDirection: "column",
+    flexShrink: 1,
+  },
+
+  completeTaskScroll: {
+    flex: 1,
+    minHeight: 180,
+  },
+
+  completeTaskScrollContent: {
+    paddingTop: 4,
+    paddingBottom: 62,
+  },
+
+  completeTaskField: {
+    marginBottom: 10,
+  },
+
+  completionDateError: {
+    fontSize: 12,
+    marginTop: 5,
+  },
+
+  completeTaskRow: {
+    flexDirection: "row",
+    gap: 12,
+    marginBottom: 10,
+  },
+
+  completeTaskColumn: {
+    flex: 1,
   },
 
   taskHistoryWindow: {
