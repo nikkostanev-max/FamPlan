@@ -20,6 +20,11 @@ import {
 
 type TaskStatus = "red" | "orange" | "blue" | "green";
 
+type TaskHistoryRecord = {
+  date: string;
+  report: string;
+};
+
 type Task = {
   id: string;
   name: string;
@@ -34,6 +39,7 @@ type Task = {
   reminderTime?: string;
   reminderDaily?: boolean;
   status: TaskStatus;
+  history?: TaskHistoryRecord[];
 };
 
 type Workbook = {
@@ -90,6 +96,16 @@ const initialTasks: Record<string, Task[]> = {
       description: "Clean the kitchen thoroughly.",
       repetition: "Every 7 days",
       status: "orange",
+      history: [
+        {
+          date: "2026-08-28",
+          report: "Kitchen cleaned completely.",
+        },
+        {
+          date: "2026-08-20",
+          report: "Cleaned kitchen and checked supplies.",
+        },
+      ],
     },
     {
       id: "home-2",
@@ -337,8 +353,12 @@ export default function App() {
   const [newTaskDescription, setNewTaskDescription] = useState("");
   const [newTaskDescriptionHeight, setNewTaskDescriptionHeight] =
     useState(72);
+  const [newTaskContentHeight, setNewTaskContentHeight] =
+    useState(0);
 
   const [isEditingTask, setIsEditingTask] =
+    useState(false);
+  const [showTaskHistory, setShowTaskHistory] =
     useState(false);
   const [editTaskName, setEditTaskName] = useState("");
   const [editTaskLocation, setEditTaskLocation] = useState("");
@@ -536,6 +556,14 @@ export default function App() {
     );
   };
 
+  const openTaskHistory = () => {
+    setShowTaskHistory(true);
+  };
+
+  const closeTaskHistory = () => {
+    setShowTaskHistory(false);
+  };
+
   const openSettings = () => {
     Alert.alert(
       "Settings",
@@ -600,55 +628,11 @@ export default function App() {
   };
 
   const getNextDuePreview = () => {
-    if (!newTaskDate.trim() || !newTaskRepeatValue.trim()) return "";
-
-    const amount = Number(newTaskRepeatValue);
-    if (!Number.isFinite(amount) || amount <= 0) return "";
-
-    const parts = newTaskDate.split("-").map(Number);
-    if (parts.length !== 3 || parts.some((part) => !Number.isFinite(part))) {
-      return "";
-    }
-
-    const [year, month, day] = parts;
-    const nextDate = new Date(year, month - 1, day);
-    if (
-      nextDate.getFullYear() !== year ||
-      nextDate.getMonth() !== month - 1 ||
-      nextDate.getDate() !== day
-    ) {
-      return "";
-    }
-
-    if (newTaskRepeatUnit === "days") {
-      nextDate.setDate(nextDate.getDate() + amount);
-    } else if (newTaskRepeatUnit === "weeks") {
-      nextDate.setDate(nextDate.getDate() + amount * 7);
-    } else if (newTaskRepeatUnit === "months") {
-      const originalDay = nextDate.getDate();
-      nextDate.setDate(1);
-      nextDate.setMonth(nextDate.getMonth() + amount);
-      const lastDay = new Date(
-        nextDate.getFullYear(),
-        nextDate.getMonth() + 1,
-        0
-      ).getDate();
-      nextDate.setDate(Math.min(originalDay, lastDay));
-    } else {
-      const originalMonth = nextDate.getMonth();
-      const originalDay = nextDate.getDate();
-      nextDate.setDate(1);
-      nextDate.setFullYear(nextDate.getFullYear() + amount);
-      nextDate.setMonth(originalMonth);
-      const lastDay = new Date(
-        nextDate.getFullYear(),
-        originalMonth + 1,
-        0
-      ).getDate();
-      nextDate.setDate(Math.min(originalDay, lastDay));
-    }
-
-    return nextDate.toLocaleDateString();
+    return calculateNextDue(
+      newTaskDate,
+      newTaskRepeatValue,
+      newTaskRepeatUnit
+    );
   };
 
   const resetNewTaskForm = () => {
@@ -663,6 +647,7 @@ export default function App() {
     setNewTaskReminderDaily(false);
     setNewTaskDescription("");
     setNewTaskDescriptionHeight(72);
+    setNewTaskContentHeight(0);
     setTaskError("");
   };
 
@@ -835,17 +820,46 @@ export default function App() {
                   {isEditingTask ? "Edit Task" : "Task"}
                 </Text>
 
-                <Pressable
-                  style={[
-                    styles.completeButton,
-                    { backgroundColor: "#43A047" },
-                  ]}
-                  onPress={openCompleteTask}
-                >
-                  <Text style={styles.completeButtonText}>
-                    Complete
-                  </Text>
-                </Pressable>
+                <View style={styles.taskHeaderActions}>
+                  {!isEditingTask && (
+                    <>
+                      <Pressable
+                        style={styles.taskHeaderIconButton}
+                        onPress={() => setIsEditingTask(true)}
+                      >
+                        <Ionicons
+                          name="create-outline"
+                          size={21}
+                          color={colors.text}
+                        />
+                      </Pressable>
+
+                      <Pressable
+                        style={styles.taskHeaderIconButton}
+                        onPress={openTaskHistory}
+                      >
+                        <Ionicons
+                          name="time-outline"
+                          size={21}
+                          color={colors.text}
+                        />
+                      </Pressable>
+
+                      <View style={styles.taskHeaderActionSpacer} />
+                    </>
+                  )}
+
+                  <Pressable
+                    style={styles.taskCloseButtonSmall}
+                    onPress={goBackToWorkbook}
+                  >
+                    <Ionicons
+                      name="close"
+                      size={18}
+                      color="#FFFFFF"
+                    />
+                  </Pressable>
+                </View>
               </View>
 
               <ScrollView
@@ -1189,39 +1203,38 @@ export default function App() {
                   { borderTopColor: colors.separator },
                 ]}
               >
-                <View style={styles.taskModalButtons}>
-                  <Pressable
+                <View
                   style={[
-                    styles.modalButton,
-                    { backgroundColor: colors.iconBackground },
+                    styles.taskModalButtons,
+                    !isEditingTask && styles.taskDetailsCompleteFooter,
                   ]}
-                  onPress={() => {
-                    if (isEditingTask) {
-                      cancelTaskEdit();
-                    } else {
-                      goBackToWorkbook();
-                    }
-                  }}
                 >
-                  <Text style={[styles.modalButtonText, { color: colors.text }]}>
-                    Cancel
-                  </Text>
-                </Pressable>
-
-                <Pressable
-                  style={[styles.modalButton, styles.createButton]}
-                  onPress={() => {
-                    if (isEditingTask) {
-                      saveTaskEdit();
-                    } else {
-                      setIsEditingTask(true);
-                    }
-                  }}
-                >
-                  <Text style={styles.createButtonText}>
-                    {isEditingTask ? "Save" : "Edit"}
-                  </Text>
-                </Pressable>
+                  {isEditingTask ? (
+                    <Pressable
+                      style={[
+                        styles.modalButton,
+                        styles.createButton,
+                      ]}
+                      onPress={saveTaskEdit}
+                    >
+                      <Text style={styles.createButtonText}>
+                        Save
+                      </Text>
+                    </Pressable>
+                  ) : (
+                    <Pressable
+                      style={[
+                        styles.modalButton,
+                        styles.completeButton,
+                        { backgroundColor: "#43A047" },
+                      ]}
+                      onPress={openCompleteTask}
+                    >
+                      <Text style={styles.completeButtonText}>
+                        Complete
+                      </Text>
+                    </Pressable>
+                  )}
                 </View>
               </View>
             </View>
@@ -2153,7 +2166,13 @@ export default function App() {
                     styles.createTaskBox,
                     {
                       backgroundColor: colors.card,
-                      height: FLOATING_WINDOW_MAX_HEIGHT,
+                      height: Math.min(
+                        FLOATING_WINDOW_MAX_HEIGHT,
+                        Math.max(
+                          300,
+                          newTaskContentHeight + 126
+                        )
+                      ),
                     },
                   ]}
                 >
@@ -2174,6 +2193,19 @@ export default function App() {
                     >
                       New Task
                     </Text>
+                    <Pressable
+                      style={styles.taskCloseButton}
+                      onPress={() => {
+                        resetNewTaskForm();
+                        setShowCreateTask(false);
+                      }}
+                    >
+                      <Ionicons
+                        name="close"
+                        size={18}
+                        color="#FFFFFF"
+                      />
+                    </Pressable>
                   </View>
 
                   <ScrollView
@@ -2182,6 +2214,9 @@ export default function App() {
                     keyboardShouldPersistTaps="handled"
                     keyboardDismissMode="interactive"
                     showsVerticalScrollIndicator={false}
+                    onContentSizeChange={(_, height) => {
+                      setNewTaskContentHeight(height);
+                    }}
                   >
 
               <Text style={[styles.taskFieldLabel, { color: colors.secondaryText }]}>
@@ -2344,9 +2379,7 @@ export default function App() {
                     color: colors.text,
                     borderColor: colors.border,
                     backgroundColor: colors.inputBackground,
-                    height: newTaskDescription
-                      ? newTaskDescriptionHeight
-                      : 72,
+                    height: newTaskDescription ? 144 : 72,
                   },
                 ]}
                 placeholder="Description (optional)"
@@ -2354,25 +2387,8 @@ export default function App() {
                 value={newTaskDescription}
                 onChangeText={setNewTaskDescription}
                 multiline
-                scrollEnabled={false}
+                scrollEnabled={newTaskDescription.length > 0}
                 textAlignVertical="top"
-                onContentSizeChange={(event) => {
-                  const contentHeight =
-                    Math.ceil(event.nativeEvent.contentSize.height);
-
-                  if (newTaskDescription.length === 0) {
-                    setNewTaskDescriptionHeight(72);
-                    return;
-                  }
-
-                  // iOS can briefly report the whole parent height for a
-                  // multiline TextInput. Ignore that oversized measurement.
-                  if (contentHeight >= 72 && contentHeight <= 500) {
-                    setNewTaskDescriptionHeight(
-                      Math.max(72, contentHeight + 18)
-                    );
-                  }
-                }}
               />
 
               <Text style={[styles.taskFieldLabel, { color: colors.secondaryText }]}>
@@ -2437,26 +2453,13 @@ export default function App() {
                     ]}
                   >
                     <View style={styles.taskModalButtons}>
-                      <Pressable
-                  style={[
-                    styles.modalButton,
-                    { backgroundColor: colors.iconBackground },
-                  ]}
-                  onPress={() => {
-                    resetNewTaskForm();
-                    setShowCreateTask(false);
-                  }}
-                >
-                  <Text style={[styles.modalButtonText, { color: colors.text }]}>
-                    Cancel
-                  </Text>
-                </Pressable>
+  
 
                 <Pressable
                   style={[styles.modalButton, styles.createButton]}
                   onPress={createTask}
                 >
-                  <Text style={styles.createButtonText}>Save</Text>
+                  <Text style={styles.createButtonText}>Add</Text>
                     </Pressable>
                     </View>
                   </View>
@@ -2468,6 +2471,143 @@ export default function App() {
       {selectedTask &&
         selectedWorkbook &&
         renderTaskDetailsWindow()}
+
+
+      {showTaskHistory &&
+        selectedTask &&
+        selectedWorkbook && (
+          <View style={styles.modalOverlay}>
+            <KeyboardAvoidingView
+              style={styles.keyboardAvoidingContainer}
+              behavior={Platform.OS === "ios" ? "padding" : "height"}
+            >
+              <View
+                style={[
+                  styles.createTaskBox,
+                  styles.taskHistoryWindow,
+                  {
+                    backgroundColor: colors.card,
+                    height: Math.min(
+                      FLOATING_WINDOW_MAX_HEIGHT,
+                      360
+                    ),
+                  },
+                ]}
+              >
+                <View
+                  style={[
+                    styles.taskModalHeader,
+                    { borderBottomColor: colors.separator },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.createWorkbookTitle,
+                      {
+                        color: colors.text,
+                        marginBottom: 0,
+                      },
+                    ]}
+                  >
+                    Task History
+                  </Text>
+
+                  <Pressable
+                    style={styles.taskCloseButtonSmall}
+                    onPress={closeTaskHistory}
+                  >
+                    <Ionicons
+                      name="close"
+                      size={18}
+                      color="#FFFFFF"
+                    />
+                  </Pressable>
+                </View>
+
+                <View
+                  style={[
+                    styles.taskHistoryTaskName,
+                    { borderBottomColor: colors.separator },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.taskHistoryTaskNameValue,
+                      { color: colors.text },
+                    ]}
+                    numberOfLines={2}
+                  >
+                    {selectedTask.name}
+                  </Text>
+                </View>
+
+                <ScrollView
+                  style={styles.taskHistoryScroll}
+                  contentContainerStyle={styles.taskHistoryList}
+                  showsVerticalScrollIndicator={false}
+                >
+                  {selectedTask.history &&
+                  selectedTask.history.length > 0 ? (
+                    [...selectedTask.history]
+                      .sort((a, b) => {
+                        const dateA = new Date(a.date).getTime();
+                        const dateB = new Date(b.date).getTime();
+                        return dateB - dateA;
+                      })
+                      .map((record, index) => (
+                        <Pressable
+                          key={`${record.date}-${index}`}
+                          style={[
+                            styles.taskHistoryRow,
+                            {
+                              borderBottomColor:
+                                colors.separator,
+                            },
+                          ]}
+                          onPress={() =>
+                            Alert.alert(
+                              "Task Record",
+                              `${formatTaskDate(record.date)}\n\n${record.report || "No report"}\n\nRecord editing will be added later.`
+                            )
+                          }
+                        >
+                          <Text
+                            style={[
+                              styles.taskHistoryDate,
+                              { color: colors.text },
+                            ]}
+                          >
+                            {formatTaskDate(record.date)}
+                          </Text>
+
+                          <Text
+                            style={[
+                              styles.taskHistoryReport,
+                              { color: colors.text },
+                            ]}
+                          >
+                            {record.report || "—"}
+                          </Text>
+                        </Pressable>
+                      ))
+                  ) : (
+                    <View style={styles.taskHistoryEmpty}>
+                      <Text
+                        style={[
+                          styles.taskHistoryEmptyText,
+                          { color: colors.secondaryText },
+                        ]}
+                      >
+                        No history yet
+                      </Text>
+                    </View>
+                  )}
+                </ScrollView>
+              </View>
+            </KeyboardAvoidingView>
+          </View>
+        )}
+
     </SafeAreaView>
   );
 }
@@ -3202,6 +3342,69 @@ const styles = StyleSheet.create({
     maxHeight: FLOATING_WINDOW_MAX_HEIGHT,
   },
 
+  taskHistoryWindow: {
+    width: "100%",
+    maxWidth: 500,
+    maxHeight: FLOATING_WINDOW_MAX_HEIGHT,
+    borderRadius: 18,
+    paddingHorizontal: 18,
+    paddingTop: 10,
+    paddingBottom: 7,
+    flexDirection: "column",
+    flexShrink: 1,
+  },
+
+  taskHistoryTaskName: {
+    paddingVertical: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+
+  taskHistoryTaskNameValue: {
+    fontSize: 16,
+    fontWeight: "600",
+  },
+
+  taskHistoryScroll: {
+    flex: 1,
+    minHeight: 120,
+  },
+
+  taskHistoryList: {
+    paddingTop: 2,
+    paddingBottom: 12,
+  },
+
+  taskHistoryRow: {
+    minHeight: 46,
+    flexDirection: "row",
+    alignItems: "flex-start",
+    paddingVertical: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+
+  taskHistoryDate: {
+    width: 92,
+    fontSize: 13,
+    fontWeight: "500",
+    marginRight: 12,
+  },
+
+  taskHistoryReport: {
+    flex: 1,
+    fontSize: 13,
+    lineHeight: 19,
+  },
+
+  taskHistoryEmpty: {
+    alignItems: "center",
+    paddingVertical: 30,
+  },
+
+  taskHistoryEmptyText: {
+    fontSize: 14,
+    fontStyle: "italic",
+  },
+
   taskDetailsWindow: {
     width: "100%",
     maxWidth: 500,
@@ -3212,6 +3415,47 @@ const styles = StyleSheet.create({
     paddingBottom: 7,
     flexDirection: "column",
     flexShrink: 1,
+  },
+
+  taskCloseButton: {
+    width: 30,
+    height: 30,
+    borderRadius: 6,
+    backgroundColor: "#D9534F",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  taskHeaderActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7,
+  },
+
+  taskHeaderIconButton: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  taskDetailsCompleteFooter: {
+    justifyContent: "flex-end",
+    width: "100%",
+  },
+
+  taskHeaderActionSpacer: {
+    width: 28,
+  },
+
+  taskCloseButtonSmall: {
+    width: 30,
+    height: 30,
+    borderRadius: 6,
+    backgroundColor: "#D9534F",
+    alignItems: "center",
+    justifyContent: "center",
   },
 
   createTaskBox: {
@@ -3366,7 +3610,7 @@ const styles = StyleSheet.create({
   taskModalButtons: {
     height: 43,
     flexDirection: "row",
-    justifyContent: "space-between",
+    justifyContent: "flex-end",
     alignItems: "center",
   },
 
