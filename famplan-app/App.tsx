@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { Ionicons } from "@expo/vector-icons";
+import DateTimePicker from "@react-native-community/datetimepicker";
 import {
   Alert,
   Dimensions,
@@ -40,6 +41,7 @@ type Task = {
   reminderDaily?: boolean;
   status: TaskStatus;
   history?: TaskHistoryRecord[];
+  hasUpdate?: boolean;
 };
 
 type Workbook = {
@@ -312,6 +314,8 @@ export default function App() {
 
   const [selectedWorkbookId, setSelectedWorkbookId] =
     useState<string | null>(null);
+  const [selectedLocation, setSelectedLocation] =
+    useState<string>("All");
 
   const [selectedTaskId, setSelectedTaskId] =
     useState<string | null>(null);
@@ -339,6 +343,10 @@ export default function App() {
 
   const [newTaskDate, setNewTaskDate] =
     useState("");
+  const [showNewTaskDatePicker, setShowNewTaskDatePicker] =
+    useState(false);
+  const [showNewTaskReminderDatePicker, setShowNewTaskReminderDatePicker] =
+    useState(false);
 
   const [newTaskLocation, setNewTaskLocation] =
     useState("");
@@ -349,6 +357,8 @@ export default function App() {
     useState<"days" | "weeks" | "months" | "years">("months");
   const [newTaskReminderDate, setNewTaskReminderDate] = useState("");
   const [newTaskReminderTime, setNewTaskReminderTime] = useState("");
+  const [showNewTaskReminderTimePicker, setShowNewTaskReminderTimePicker] =
+    useState(false);
   const [newTaskReminderDaily, setNewTaskReminderDaily] = useState(false);
   const [newTaskDescription, setNewTaskDescription] = useState("");
   const [newTaskDescriptionHeight, setNewTaskDescriptionHeight] =
@@ -360,6 +370,16 @@ export default function App() {
     useState(false);
   const [showTaskHistory, setShowTaskHistory] =
     useState(false);
+  const [showTaskRecord, setShowTaskRecord] =
+    useState(false);
+  const [selectedHistoryRecord, setSelectedHistoryRecord] =
+    useState<TaskHistoryRecord | null>(null);
+  const [showRecordEdit, setShowRecordEdit] = useState(false);
+  const [recordEditDate, setRecordEditDate] = useState("");
+  const [recordEditReport, setRecordEditReport] = useState("");
+  const [recordEditDateError, setRecordEditDateError] = useState("");
+  const [showRecordEditDatePicker, setShowRecordEditDatePicker] =
+    useState(false);
   const [showCompleteTask, setShowCompleteTask] =
     useState(false);
   const [completionDate, setCompletionDate] =
@@ -368,15 +388,25 @@ export default function App() {
     useState("");
   const [completionDateError, setCompletionDateError] =
     useState("");
+  const [showCompletionDatePicker, setShowCompletionDatePicker] =
+    useState(false);
   const [editTaskName, setEditTaskName] = useState("");
   const [editTaskLocation, setEditTaskLocation] = useState("");
   const [editTaskDate, setEditTaskDate] = useState("");
+  const [showEditTaskDatePicker, setShowEditTaskDatePicker] =
+    useState(false);
   const [editTaskPrewarning, setEditTaskPrewarning] = useState("");
+  const [editPrewarningError, setEditPrewarningError] = useState("");
+  const [newPrewarningError, setNewPrewarningError] = useState("");
   const [editTaskRepeatValue, setEditTaskRepeatValue] = useState("");
   const [editTaskRepeatUnit, setEditTaskRepeatUnit] =
     useState<"days" | "weeks" | "months" | "years">("months");
   const [editTaskReminderDate, setEditTaskReminderDate] = useState("");
+  const [showEditTaskReminderDatePicker, setShowEditTaskReminderDatePicker] =
+    useState(false);
   const [editTaskReminderTime, setEditTaskReminderTime] = useState("");
+  const [showEditTaskReminderTimePicker, setShowEditTaskReminderTimePicker] =
+    useState(false);
   const [editTaskReminderDaily, setEditTaskReminderDaily] = useState(false);
   const [editTaskDescription, setEditTaskDescription] = useState("");
 
@@ -408,15 +438,97 @@ export default function App() {
       (workbook) => workbook.id === selectedWorkbookId
     ) ?? null;
 
-  const selectedTasks = useMemo(() => {
+  const workbookTasks = useMemo(() => {
     if (!selectedWorkbookId) {
       return [];
     }
 
-    return [...(tasksByWorkbook[selectedWorkbookId] ?? [])].sort(
-      (a, b) => parseTaskDate(a.date) - parseTaskDate(b.date)
-    );
+    return tasksByWorkbook[selectedWorkbookId] ?? [];
   }, [selectedWorkbookId, tasksByWorkbook]);
+
+  const workbookLocations = useMemo(() => {
+    const locationData = new Map<
+      string,
+      { label: string; count: number; order: number }
+    >();
+    let order = 0;
+
+    workbookTasks.forEach((task) => {
+      const location = task.location?.trim();
+      const key = location ? location.toLowerCase() : "__unallocated__";
+      const label = location || "Unallocated";
+      const existing = locationData.get(key);
+
+      if (existing) {
+        existing.count += 1;
+      } else {
+        locationData.set(key, {
+          label,
+          count: 1,
+          order: order++,
+        });
+      }
+    });
+
+    const sortedLocations = [...locationData.values()].sort(
+      (a, b) => {
+        if (b.count !== a.count) {
+          return b.count - a.count;
+        }
+
+        return a.order - b.order;
+      }
+    );
+
+    const unallocated = locationData.get("__unallocated__");
+
+    return {
+      locations: sortedLocations
+        .filter((item) => item.label !== "Unallocated")
+        .map((item) => item.label),
+      hasUnallocated: Boolean(unallocated),
+      unallocatedCount: unallocated?.count ?? 0,
+      sortedLocations,
+    };
+  }, [workbookTasks]);
+
+  const selectedTasks = useMemo(() => {
+    const filtered =
+      selectedLocation === "All"
+        ? workbookTasks
+        : selectedLocation === "Unallocated"
+          ? workbookTasks.filter(
+              (task) => !task.location?.trim()
+            )
+          : workbookTasks.filter(
+              (task) =>
+                task.location?.trim().toLowerCase() ===
+                selectedLocation.toLowerCase()
+            );
+
+    const statusPriority: Record<TaskStatus, number> = {
+      red: 0,
+      orange: 1,
+      blue: 2,
+      green: 3,
+    };
+
+    return [...filtered].sort((a, b) => {
+      const updatePriority =
+        Number(Boolean(b.hasUpdate)) -
+        Number(Boolean(a.hasUpdate));
+
+      if (updatePriority !== 0) return updatePriority;
+
+      const statusDifference =
+        statusPriority[a.status] - statusPriority[b.status];
+
+      if (statusDifference !== 0) return statusDifference;
+
+      return parseTaskDate(a.date) - parseTaskDate(b.date);
+    });
+  }, [workbookTasks, selectedLocation]);
+
 
   const selectedTask = useMemo(() => {
     if (!selectedWorkbookId || !selectedTaskId) {
@@ -437,6 +549,7 @@ export default function App() {
   const openWorkbook = (workbook: Workbook) => {
     setSelectedWorkbookId(workbook.id);
     setSelectedTaskId(null);
+    setSelectedLocation("All");
 
     setWorkbooks((current) => {
       const selected = current.find(
@@ -482,10 +595,23 @@ export default function App() {
   const openTask = (task: Task) => {
     setSelectedTaskId(task.id);
     setIsEditingTask(false);
+
+    if (task.hasUpdate && selectedWorkbookId) {
+      setTasksByWorkbook((current) => ({
+        ...current,
+        [selectedWorkbookId]: (current[selectedWorkbookId] ?? []).map(
+          (item) =>
+            item.id === task.id
+              ? { ...item, hasUpdate: false }
+              : item
+        ),
+      }));
+    }
     setEditTaskName(task.name);
     setEditTaskLocation(task.location ?? "");
     setEditTaskDate(task.date ?? "");
     setEditTaskPrewarning(task.prewarning ?? "");
+    setEditPrewarningError("");
     setEditTaskRepeatValue(task.repeatValue ?? "");
     setEditTaskRepeatUnit(task.repeatUnit ?? "months");
     setEditTaskReminderDate(task.reminderDate ?? "");
@@ -500,6 +626,7 @@ export default function App() {
       setEditTaskLocation(selectedTask.location ?? "");
       setEditTaskDate(selectedTask.date ?? "");
       setEditTaskPrewarning(selectedTask.prewarning ?? "");
+      setEditPrewarningError("");
       setEditTaskRepeatValue(selectedTask.repeatValue ?? "");
       setEditTaskRepeatUnit(selectedTask.repeatUnit ?? "months");
       setEditTaskReminderDate(selectedTask.reminderDate ?? "");
@@ -521,6 +648,13 @@ export default function App() {
       Alert.alert("Task name", "Task name is required.");
       return;
     }
+
+    if (!isValidPrewarning(editTaskPrewarning)) {
+      setEditPrewarningError("Prewarning not less than 1 day");
+      return;
+    }
+
+    setEditPrewarningError("");
 
     setTasksByWorkbook((current) => ({
       ...current,
@@ -558,9 +692,15 @@ export default function App() {
   };
 
   const openCompleteTask = () => {
-    setCompletionDate(
-      new Date().toISOString().slice(0, 10)
-    );
+    const today = new Date();
+    const localToday =
+      `${today.getFullYear()}-${String(
+        today.getMonth() + 1
+      ).padStart(2, "0")}-${String(
+        today.getDate()
+      ).padStart(2, "0")}`;
+
+    setCompletionDate(localToday);
     setCompletionReport("");
     setCompletionDateError("");
     setShowCompleteTask(true);
@@ -691,6 +831,84 @@ export default function App() {
     setShowTaskHistory(false);
   };
 
+  const openTaskRecord = (record: TaskHistoryRecord) => {
+    setSelectedHistoryRecord(record);
+    setShowTaskRecord(true);
+  };
+
+  const closeTaskRecord = () => {
+    setShowTaskRecord(false);
+    setSelectedHistoryRecord(null);
+  };
+
+  const openRecordEdit = () => {
+    if (!selectedHistoryRecord) return;
+    setRecordEditDate(selectedHistoryRecord.date);
+    setRecordEditReport(selectedHistoryRecord.report);
+    setRecordEditDateError("");
+    setShowRecordEdit(true);
+  };
+
+  const closeRecordEdit = () => {
+    setShowRecordEdit(false);
+    setRecordEditDateError("");
+  };
+
+  const saveRecordEdit = () => {
+    if (!selectedWorkbookId || !selectedTaskId || !selectedHistoryRecord) return;
+
+    const value = recordEditDate.trim();
+
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+      setRecordEditDateError("Enter a valid date in YYYY-MM-DD format.");
+      return;
+    }
+
+    const [year, month, day] = value.split("-").map(Number);
+    const enteredDate = new Date(year, month - 1, day);
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+    if (
+      enteredDate.getFullYear() !== year ||
+      enteredDate.getMonth() !== month - 1 ||
+      enteredDate.getDate() !== day
+    ) {
+      setRecordEditDateError("Enter a valid date.");
+      return;
+    }
+
+    if (enteredDate > today) {
+      setRecordEditDateError("Date of completion cannot be in the future.");
+      return;
+    }
+
+    const oldRecord = selectedHistoryRecord;
+
+    setTasksByWorkbook((current) => ({
+      ...current,
+      [selectedWorkbookId]: (current[selectedWorkbookId] ?? []).map((task) =>
+        task.id !== selectedTaskId
+          ? task
+          : {
+              ...task,
+              history: (task.history ?? []).map((record) =>
+                record === oldRecord
+                  ? { date: value, report: recordEditReport.trim() }
+                  : record
+              ),
+            }
+      ),
+    }));
+
+    setSelectedHistoryRecord({
+      date: value,
+      report: recordEditReport.trim(),
+    });
+    setShowRecordEdit(false);
+    setRecordEditDateError("");
+  };
+
   const openSettings = () => {
     Alert.alert(
       "Settings",
@@ -754,6 +972,73 @@ export default function App() {
     setShowCreateWorkbook(false);
   };
 
+  const getStoredTimeValue = (value?: string) => {
+    const now = new Date();
+
+    if (value && /^\d{2}:\d{2}$/.test(value)) {
+      const [hour, minute] = value.split(":").map(Number);
+
+      if (
+        hour >= 0 &&
+        hour <= 23 &&
+        minute >= 0 &&
+        minute <= 59
+      ) {
+        now.setHours(hour, minute, 0, 0);
+      }
+    }
+
+    return now;
+  };
+
+  const formatTimeForStorage = (date: Date) =>
+    `${String(date.getHours()).padStart(2, "0")}:${String(
+      date.getMinutes()
+    ).padStart(2, "0")}`;
+
+  const getStoredDateValue = (value?: string) => {
+    if (value && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
+      const [year, month, day] = value.split("-").map(Number);
+      const date = new Date(year, month - 1, day);
+
+      if (
+        date.getFullYear() === year &&
+        date.getMonth() === month - 1 &&
+        date.getDate() === day
+      ) {
+        return date;
+      }
+    }
+
+    return new Date();
+  };
+
+  const getNewTaskDateValue = () => {
+    if (/^\d{4}-\d{2}-\d{2}$/.test(newTaskDate)) {
+      const [year, month, day] = newTaskDate
+        .split("-")
+        .map(Number);
+      const date = new Date(year, month - 1, day);
+
+      if (
+        date.getFullYear() === year &&
+        date.getMonth() === month - 1 &&
+        date.getDate() === day
+      ) {
+        return date;
+      }
+    }
+
+    return new Date();
+  };
+
+  const formatDateForStorage = (date: Date) =>
+    `${date.getFullYear()}-${String(
+      date.getMonth() + 1
+    ).padStart(2, "0")}-${String(
+      date.getDate()
+    ).padStart(2, "0")}`;
+
   const getNextDuePreview = () => {
     return calculateNextDue(
       newTaskDate,
@@ -765,6 +1050,7 @@ export default function App() {
   const resetNewTaskForm = () => {
     setNewTaskName("");
     setNewTaskDate("");
+    setShowNewTaskDatePicker(false);
     setNewTaskLocation("");
     setNewTaskPrewarning("");
     setNewTaskRepeatValue("");
@@ -776,6 +1062,17 @@ export default function App() {
     setNewTaskDescriptionHeight(72);
     setNewTaskContentHeight(0);
     setTaskError("");
+    setNewPrewarningError("");
+  };
+
+  const isValidPrewarning = (value: string) => {
+    const trimmed = value.trim();
+
+    if (trimmed === "") {
+      return true;
+    }
+
+    return /^\d+$/.test(trimmed) && Number(trimmed) >= 1;
   };
 
   const createTask = () => {
@@ -789,6 +1086,13 @@ export default function App() {
       setTaskError("Task name is required.");
       return;
     }
+
+    if (!isValidPrewarning(newTaskPrewarning)) {
+      setNewPrewarningError("Prewarning not less than 1 day");
+      return;
+    }
+
+    setNewPrewarningError("");
 
     const currentTasks =
       tasksByWorkbook[selectedWorkbookId] ?? [];
@@ -978,7 +1282,11 @@ export default function App() {
 
                   <Pressable
                     style={styles.taskCloseButtonSmall}
-                    onPress={goBackToWorkbook}
+                    onPress={
+                      isEditingTask
+                        ? cancelTaskEdit
+                        : goBackToWorkbook
+                    }
                   >
                     <Ionicons
                       name="close"
@@ -1039,22 +1347,92 @@ export default function App() {
                     <Text style={[styles.taskFieldLabel, { color: colors.secondaryText }]}>
                       Due date
                     </Text>
-                    <TextInput
+                    <Pressable
                       style={[
                         styles.workbookInput,
+                        styles.newTaskDatePickerField,
                         {
-                          color: colors.text,
                           borderColor: colors.border,
                           backgroundColor: colors.inputBackground,
                         },
                       ]}
-                      placeholder="YYYY-MM-DD (optional)"
-                      placeholderTextColor={colors.secondaryText}
-                      value={editTaskDate}
-                      onChangeText={setEditTaskDate}
-                      returnKeyType="done"
-                      onSubmitEditing={() => Keyboard.dismiss()}
-                    />
+                      onPress={() =>
+                        setShowEditTaskDatePicker((current) => !current)
+                      }
+                    >
+                      <Text
+                        style={[
+                          styles.newTaskDatePickerText,
+                          {
+                            color: editTaskDate
+                              ? colors.text
+                              : colors.secondaryText,
+                          },
+                        ]}
+                      >
+                        {editTaskDate
+                          ? formatTaskDate(editTaskDate)
+                          : "Select date (optional)"}
+                      </Text>
+                      <Ionicons
+                        name="calendar-outline"
+                        size={19}
+                        color={colors.secondaryText}
+                      />
+                    </Pressable>
+                    {showEditTaskDatePicker && (
+                      <View
+                        style={[
+                          styles.newTaskDatePickerContainer,
+                          {
+                            borderColor: colors.border,
+                            backgroundColor: colors.inputBackground,
+                          },
+                        ]}
+                      >
+                        <DateTimePicker
+                          value={getStoredDateValue(editTaskDate)}
+                          mode="date"
+                          display={Platform.OS === "ios" ? "inline" : "calendar"}
+                          onChange={(event, date) => {
+                            if (Platform.OS === "android") {
+                              setShowEditTaskDatePicker(false);
+                            }
+                            if (date) {
+                              setEditTaskDate(formatDateForStorage(date));
+                            }
+                          }}
+                        />
+                        <View style={styles.datePickerActionRow}>
+                          <Pressable
+                            style={styles.newTaskDateDoneButton}
+                            onPress={() => setEditTaskDate("")}
+                          >
+                            <Text
+                              style={[
+                                styles.newTaskDateDoneText,
+                                { color: colors.secondaryText },
+                              ]}
+                            >
+                              Clear
+                            </Text>
+                          </Pressable>
+                          <Pressable
+                            style={styles.newTaskDateDoneButton}
+                            onPress={() => setShowEditTaskDatePicker(false)}
+                          >
+                            <Text
+                              style={[
+                                styles.newTaskDateDoneText,
+                                { color: colors.text },
+                              ]}
+                            >
+                              Done
+                            </Text>
+                          </Pressable>
+                        </View>
+                      </View>
+                    )}
 
                     {editTaskDate.trim() !== "" && (
                       <>
@@ -1071,16 +1449,29 @@ export default function App() {
                                 backgroundColor: colors.inputBackground,
                               },
                             ]}
-                            placeholder="1"
+                            placeholder="-"
                             placeholderTextColor={colors.secondaryText}
                             value={editTaskPrewarning}
-                            onChangeText={setEditTaskPrewarning}
+                            onChangeText={(value) => {
+                              setEditTaskPrewarning(value);
+                              setEditPrewarningError("");
+                            }}
                             keyboardType="number-pad"
                           />
                           <Text style={[styles.inlineFieldText, { color: colors.text }]}>
                             days before due date
                           </Text>
                         </View>
+                        {editPrewarningError ? (
+                          <Text
+                            style={[
+                              styles.prewarningErrorText,
+                              { color: colors.error },
+                            ]}
+                          >
+                            {editPrewarningError}
+                          </Text>
+                        ) : null}
                       </>
                     )}
 
@@ -1138,6 +1529,49 @@ export default function App() {
                       </Text>
                     </View>
 
+                    {showEditTaskReminderTimePicker && (
+                      <View
+                        style={[
+                          styles.newTaskDatePickerContainer,
+                          {
+                            borderColor: colors.border,
+                            backgroundColor: colors.inputBackground,
+                          },
+                        ]}
+                      >
+                        <DateTimePicker
+                          value={getStoredTimeValue(editTaskReminderTime)}
+                          mode="time"
+                          display={Platform.OS === "ios" ? "spinner" : "clock"}
+                          onChange={(event, date) => {
+                            if (Platform.OS === "android") {
+                              setShowEditTaskReminderTimePicker(false);
+                            }
+                            if (date) {
+                              setEditTaskReminderTime(
+                                formatTimeForStorage(date)
+                              );
+                            }
+                          }}
+                        />
+                        <Pressable
+                          style={styles.newTaskDateDoneButton}
+                          onPress={() =>
+                            setShowEditTaskReminderTimePicker(false)
+                          }
+                        >
+                          <Text
+                            style={[
+                              styles.newTaskDateDoneText,
+                              { color: colors.text },
+                            ]}
+                          >
+                            Done
+                          </Text>
+                        </Pressable>
+                      </View>
+                    )}
+
                     <Text style={[styles.taskFieldLabel, { color: colors.secondaryText }]}>
                       Description
                     </Text>
@@ -1165,34 +1599,71 @@ export default function App() {
                       Custom reminder
                     </Text>
                     <View style={styles.reminderRow}>
-                      <TextInput
+                      <Pressable
                         style={[
                           styles.reminderDateInput,
+                          styles.datePickerCompactField,
                           {
-                            color: colors.text,
                             borderColor: colors.border,
                             backgroundColor: colors.inputBackground,
                           },
                         ]}
-                        placeholder="YYYY-MM-DD"
-                        placeholderTextColor={colors.secondaryText}
-                        value={editTaskReminderDate}
-                        onChangeText={setEditTaskReminderDate}
-                      />
-                      <TextInput
+                        onPress={() =>
+                          setShowEditTaskReminderDatePicker((current) => !current)
+                        }
+                      >
+                        <Text
+                          style={[
+                            styles.datePickerCompactText,
+                            {
+                              color: editTaskReminderDate
+                                ? colors.text
+                                : colors.secondaryText,
+                            },
+                          ]}
+                          numberOfLines={1}
+                        >
+                          {editTaskReminderDate
+                            ? formatTaskDate(editTaskReminderDate)
+                            : "Date"}
+                        </Text>
+                        <Ionicons
+                          name="calendar-outline"
+                          size={17}
+                          color={colors.secondaryText}
+                        />
+                      </Pressable>
+                      <Pressable
                         style={[
                           styles.reminderTimeInput,
+                          styles.datePickerCompactField,
                           {
-                            color: colors.text,
                             borderColor: colors.border,
                             backgroundColor: colors.inputBackground,
                           },
                         ]}
-                        placeholder="08:00"
-                        placeholderTextColor={colors.secondaryText}
-                        value={editTaskReminderTime}
-                        onChangeText={setEditTaskReminderTime}
-                      />
+                        onPress={() =>
+                          setShowEditTaskReminderTimePicker((current) => !current)
+                        }
+                      >
+                        <Text
+                          style={[
+                            styles.datePickerCompactText,
+                            {
+                              color: editTaskReminderTime
+                                ? colors.text
+                                : colors.secondaryText,
+                            },
+                          ]}
+                        >
+                          {editTaskReminderTime || "Time"}
+                        </Text>
+                        <Ionicons
+                          name="time-outline"
+                          size={17}
+                          color={colors.secondaryText}
+                        />
+                      </Pressable>
                       <Pressable
                         style={styles.dailyToggle}
                         onPress={() =>
@@ -1213,6 +1684,63 @@ export default function App() {
                         </Text>
                       </Pressable>
                     </View>
+                    {showEditTaskReminderDatePicker && (
+                      <View
+                        style={[
+                          styles.newTaskDatePickerContainer,
+                          {
+                            borderColor: colors.border,
+                            backgroundColor: colors.inputBackground,
+                          },
+                        ]}
+                      >
+                        <DateTimePicker
+                          value={getStoredDateValue(editTaskReminderDate)}
+                          mode="date"
+                          display={Platform.OS === "ios" ? "inline" : "calendar"}
+                          onChange={(event, date) => {
+                            if (Platform.OS === "android") {
+                              setShowEditTaskReminderDatePicker(false);
+                            }
+                            if (date) {
+                              setEditTaskReminderDate(
+                                formatDateForStorage(date)
+                              );
+                            }
+                          }}
+                        />
+                        <View style={styles.datePickerActionRow}>
+                          <Pressable
+                            style={styles.newTaskDateDoneButton}
+                            onPress={() => setEditTaskReminderDate("")}
+                          >
+                            <Text
+                              style={[
+                                styles.newTaskDateDoneText,
+                                { color: colors.secondaryText },
+                              ]}
+                            >
+                              Clear
+                            </Text>
+                          </Pressable>
+                          <Pressable
+                            style={styles.newTaskDateDoneButton}
+                            onPress={() =>
+                              setShowEditTaskReminderDatePicker(false)
+                            }
+                          >
+                            <Text
+                              style={[
+                                styles.newTaskDateDoneText,
+                                { color: colors.text },
+                              ]}
+                            >
+                              Done
+                            </Text>
+                          </Pressable>
+                        </View>
+                      </View>
+                    )}
                   </>
                 ) : (
                   <>
@@ -1228,7 +1756,7 @@ export default function App() {
                         </Text>
                       </View>
 
-                      <View style={styles.taskInfoColumn}>
+                      <View style={styles.taskInfoColumnRight}>
                         <Text style={[styles.taskInfoLabel, { color: colors.secondaryText }]}>
                           Location
                         </Text>
@@ -1242,7 +1770,18 @@ export default function App() {
                             },
                           ]}
                         >
-                          {displayLocation || "not defined"}
+                          {displayLocation ? (
+                        displayLocation
+                      ) : (
+                        <Text
+                          style={[
+                            styles.notDefinedText,
+                            { color: colors.text },
+                          ]}
+                        >
+                          not defined
+                        </Text>
+                      )}
                         </Text>
                       </View>
                     </View>
@@ -1253,20 +1792,28 @@ export default function App() {
                           Due date
                         </Text>
                         <Text style={[styles.taskInfoValue, { color: colors.text }]}>
-                          {displayDate
-                            ? formatTaskDate(displayDate)
-                            : "not defined"}
+                          {displayDate ? (
+                            formatTaskDate(displayDate)
+                          ) : (
+                            <Text style={styles.notDefinedText}>
+                              not defined
+                            </Text>
+                          )}
                         </Text>
                       </View>
 
-                      <View style={styles.taskInfoColumn}>
+                      <View style={styles.taskInfoColumnRight}>
                         <Text style={[styles.taskInfoLabel, { color: colors.secondaryText }]}>
                           Prewarning
                         </Text>
                         <Text style={[styles.taskInfoValue, { color: colors.text }]}>
-                          {displayPrewarning
-                            ? `${displayPrewarning} days`
-                            : "not defined"}
+                          {displayPrewarning ? (
+                            `${displayPrewarning} days`
+                          ) : (
+                            <Text style={styles.notDefinedText}>
+                              not defined
+                            </Text>
+                          )}
                         </Text>
                       </View>
                     </View>
@@ -1277,18 +1824,28 @@ export default function App() {
                           Next Due
                         </Text>
                         <Text style={[styles.taskInfoValue, { color: colors.text }]}>
-                          {nextDue || "not defined"}
+                          {nextDue ? (
+                            nextDue
+                          ) : (
+                            <Text style={styles.notDefinedText}>
+                              not defined
+                            </Text>
+                          )}
                         </Text>
                       </View>
 
-                      <View style={styles.taskInfoColumn}>
+                      <View style={styles.taskInfoColumnRight}>
                         <Text style={[styles.taskInfoLabel, { color: colors.secondaryText }]}>
                           Repeat interval
                         </Text>
                         <Text style={[styles.taskInfoValue, { color: colors.text }]}>
-                          {displayRepeatValue
-                            ? `${displayRepeatValue} ${displayRepeatUnit}`
-                            : "not defined"}
+                          {displayRepeatValue ? (
+                            `${displayRepeatValue} ${displayRepeatUnit}`
+                          ) : (
+                            <Text style={styles.notDefinedText}>
+                              not defined
+                            </Text>
+                          )}
                         </Text>
                       </View>
                     </View>
@@ -1298,7 +1855,13 @@ export default function App() {
                         Description
                       </Text>
                       <Text style={[styles.taskInfoValue, { color: colors.text }]}>
-                        {displayDescription || "not defined"}
+                        {displayDescription ? (
+                            displayDescription
+                          ) : (
+                            <Text style={styles.notDefinedText}>
+                              not defined
+                            </Text>
+                          )}
                       </Text>
                     </View>
 
@@ -1307,17 +1870,21 @@ export default function App() {
                         Custom reminder
                       </Text>
                       <Text style={[styles.taskInfoValue, { color: colors.text }]}>
-                        {displayReminderDate || displayReminderTime
-                          ? `${displayReminderDate || "—"}${
-                              displayReminderTime
-                                ? ` ${displayReminderTime}`
-                                : ""
-                            }${
-                              displayReminderDaily
-                                ? " · Daily"
-                                : ""
-                            }`
-                          : "not defined"}
+                        {displayReminderDate || displayReminderTime ? (
+                          `${displayReminderDate || "—"}${
+                            displayReminderTime
+                              ? ` ${displayReminderTime}`
+                              : ""
+                          }${
+                            displayReminderDaily
+                              ? " · Daily"
+                              : ""
+                          }`
+                        ) : (
+                          <Text style={styles.notDefinedText}>
+                            not defined
+                          </Text>
+                        )}
                       </Text>
                     </View>
                   </>
@@ -1747,108 +2314,80 @@ export default function App() {
                 styles.locationTabs
               }
             >
-              <View
+              <Pressable
                 style={[
                   styles.locationTab,
-                  styles.locationTabActive,
+                  selectedLocation === "All" &&
+                    styles.locationTabActive,
+                  {
+                    borderColor:
+                      selectedLocation === "All"
+                        ? colors.text
+                        : colors.border,
+                  },
                 ]}
+                onPress={() => setSelectedLocation("All")}
               >
                 <Text
-                  style={
-                    styles.locationTabActiveText
-                  }
+                  style={[
+                    styles.locationTabText,
+                    selectedLocation === "All" &&
+                      styles.locationTabActiveText,
+                    {
+                      color:
+                        selectedLocation === "All"
+                          ? "#FFFFFF"
+                          : colors.secondaryText,
+                    },
+                  ]}
                 >
                   All
                 </Text>
-              </View>
+              </Pressable>
 
-              <View
-                style={[
-                  styles.locationTab,
-                  {
-                    borderColor:
-                      colors.border,
-                  },
-                ]}
-              >
-                <Text
-                  style={[
-                    styles.locationTabText,
-                    {
-                      color:
-                        colors.secondaryText,
-                    },
-                  ]}
-                >
-                  Home
-                </Text>
-              </View>
+              {workbookLocations.sortedLocations.map((item) => {
+                const location = item.label;
+                const active =
+                  selectedLocation.toLowerCase() ===
+                  location.toLowerCase();
 
-              <View
-                style={[
-                  styles.locationTab,
-                  {
-                    borderColor:
-                      colors.border,
-                  },
-                ]}
-              >
-                <Text
-                  style={[
-                    styles.locationTabText,
-                    {
-                      color:
-                        colors.secondaryText,
-                    },
-                  ]}
-                >
-                  Garage
-                </Text>
-              </View>
-
-              <View
-                style={[
-                  styles.locationTab,
-                  {
-                    borderColor:
-                      colors.border,
-                  },
-                ]}
-              >
-                <Text
-                  style={[
-                    styles.locationTabText,
-                    {
-                      color:
-                        colors.secondaryText,
-                    },
-                  ]}
-                >
-                  Online
-                </Text>
-              </View>
-
-              <View
-                style={[
-                  styles.locationTab,
-                  {
-                    borderColor:
-                      colors.border,
-                  },
-                ]}
-              >
-                <Text
-                  style={[
-                    styles.locationTabText,
-                    {
-                      color:
-                        colors.secondaryText,
-                    },
-                  ]}
-                >
-                  Unallocated
-                </Text>
-              </View>
+                return (
+                  <Pressable
+                    key={`location-${location}`}
+                    style={[
+                      styles.locationTab,
+                      active &&
+                        styles.locationTabActive,
+                      {
+                        borderColor: active
+                          ? colors.text
+                          : colors.border,
+                      },
+                    ]}
+                    onPress={() =>
+                      setSelectedLocation(location)
+                    }
+                  >
+                    <Text
+                      style={[
+                        styles.locationTabText,
+                        active &&
+                          styles.locationTabActiveText,
+                        {
+                          color: active
+                            ? "#FFFFFF"
+                            : colors.secondaryText,
+                        },
+                        location === "Unallocated" &&
+                          styles.unallocatedText,
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {location}
+                    </Text>
+                  </Pressable>
+                );
+              })}
             </ScrollView>
           </View>
 
@@ -1924,6 +2463,9 @@ export default function App() {
                         {
                           color:
                             colors.text,
+                          fontWeight: task.hasUpdate
+                            ? "700"
+                            : "400",
                         },
                       ]}
                       numberOfLines={1}
@@ -1937,6 +2479,9 @@ export default function App() {
                         {
                           color:
                             colors.secondaryText,
+                          fontWeight: task.hasUpdate
+                            ? "700"
+                            : "400",
                         },
                       ]}
                       numberOfLines={1}
@@ -1952,6 +2497,9 @@ export default function App() {
                         {
                           color:
                             colors.secondaryText,
+                          fontWeight: task.hasUpdate
+                            ? "700"
+                            : "400",
                         },
                         !task.location &&
                           styles.unallocatedText,
@@ -2398,22 +2946,80 @@ export default function App() {
               <Text style={[styles.taskFieldLabel, { color: colors.secondaryText }]}>
                 Due date
               </Text>
-              <TextInput
+              <Pressable
                 style={[
                   styles.workbookInput,
+                  styles.newTaskDatePickerField,
                   {
-                    color: colors.text,
                     borderColor: colors.border,
                     backgroundColor: colors.inputBackground,
                   },
                 ]}
-                placeholder="YYYY-MM-DD (optional)"
-                placeholderTextColor={colors.secondaryText}
-                value={newTaskDate}
-                onChangeText={setNewTaskDate}
-                returnKeyType="done"
-                onSubmitEditing={() => Keyboard.dismiss()}
-              />
+                onPress={() =>
+                  setShowNewTaskDatePicker((current) => !current)
+                }
+              >
+                <Text
+                  style={[
+                    styles.newTaskDatePickerText,
+                    {
+                      color: newTaskDate
+                        ? colors.text
+                        : colors.secondaryText,
+                    },
+                  ]}
+                >
+                  {newTaskDate
+                    ? formatTaskDate(newTaskDate)
+                    : "Select date (optional)"}
+                </Text>
+                <Ionicons
+                  name="calendar-outline"
+                  size={19}
+                  color={colors.secondaryText}
+                />
+              </Pressable>
+
+              {showNewTaskDatePicker && (
+                <View
+                  style={[
+                    styles.newTaskDatePickerContainer,
+                    {
+                      borderColor: colors.border,
+                      backgroundColor: colors.inputBackground,
+                    },
+                  ]}
+                >
+                  <DateTimePicker
+                    value={getNewTaskDateValue()}
+                    mode="date"
+                    display={Platform.OS === "ios" ? "inline" : "calendar"}
+                    onChange={(event, date) => {
+                      if (Platform.OS === "android") {
+                        setShowNewTaskDatePicker(false);
+                      }
+
+                      if (date) {
+                        setNewTaskDate(formatDateForStorage(date));
+                      }
+                    }}
+                  />
+
+                  <Pressable
+                    style={styles.newTaskDateDoneButton}
+                    onPress={() => setShowNewTaskDatePicker(false)}
+                  >
+                    <Text
+                      style={[
+                        styles.newTaskDateDoneText,
+                        { color: colors.text },
+                      ]}
+                    >
+                      Done
+                    </Text>
+                  </Pressable>
+                </View>
+              )}
 
               {newTaskDate.trim() !== "" && (
                 <>
@@ -2430,16 +3036,29 @@ export default function App() {
                           backgroundColor: colors.inputBackground,
                         },
                       ]}
-                      placeholder="1"
+                      placeholder="-"
                       placeholderTextColor={colors.secondaryText}
                       value={newTaskPrewarning}
-                      onChangeText={setNewTaskPrewarning}
+                      onChangeText={(value) => {
+                        setNewTaskPrewarning(value);
+                        setNewPrewarningError("");
+                      }}
                       keyboardType="number-pad"
                     />
                     <Text style={[styles.inlineFieldText, { color: colors.text }]}>
                       days before due date
                     </Text>
                   </View>
+                  {newPrewarningError ? (
+                    <Text
+                      style={[
+                        styles.prewarningErrorText,
+                        { color: colors.error },
+                      ]}
+                    >
+                      {newPrewarningError}
+                    </Text>
+                  ) : null}
                 </>
               )}
 
@@ -2522,34 +3141,71 @@ export default function App() {
                 Custom reminder
               </Text>
               <View style={styles.reminderRow}>
-                <TextInput
+                <Pressable
                   style={[
                     styles.reminderDateInput,
+                    styles.datePickerCompactField,
                     {
-                      color: colors.text,
                       borderColor: colors.border,
                       backgroundColor: colors.inputBackground,
                     },
                   ]}
-                  placeholder="YYYY-MM-DD"
-                  placeholderTextColor={colors.secondaryText}
-                  value={newTaskReminderDate}
-                  onChangeText={setNewTaskReminderDate}
-                />
-                <TextInput
+                  onPress={() =>
+                    setShowNewTaskReminderDatePicker((current) => !current)
+                  }
+                >
+                  <Text
+                    style={[
+                      styles.datePickerCompactText,
+                      {
+                        color: newTaskReminderDate
+                          ? colors.text
+                          : colors.secondaryText,
+                      },
+                    ]}
+                    numberOfLines={1}
+                  >
+                    {newTaskReminderDate
+                      ? formatTaskDate(newTaskReminderDate)
+                      : "Date"}
+                  </Text>
+                  <Ionicons
+                    name="calendar-outline"
+                    size={17}
+                    color={colors.secondaryText}
+                  />
+                </Pressable>
+                <Pressable
                   style={[
                     styles.reminderTimeInput,
+                    styles.datePickerCompactField,
                     {
-                      color: colors.text,
                       borderColor: colors.border,
                       backgroundColor: colors.inputBackground,
                     },
                   ]}
-                  placeholder="08:00"
-                  placeholderTextColor={colors.secondaryText}
-                  value={newTaskReminderTime}
-                  onChangeText={setNewTaskReminderTime}
-                />
+                  onPress={() =>
+                    setShowNewTaskReminderTimePicker((current) => !current)
+                  }
+                >
+                  <Text
+                    style={[
+                      styles.datePickerCompactText,
+                      {
+                        color: newTaskReminderTime
+                          ? colors.text
+                          : colors.secondaryText,
+                      },
+                    ]}
+                  >
+                    {newTaskReminderTime || "Time"}
+                  </Text>
+                  <Ionicons
+                    name="time-outline"
+                    size={17}
+                    color={colors.secondaryText}
+                  />
+                </Pressable>
                 <Pressable
                   style={styles.dailyToggle}
                   onPress={() =>
@@ -2570,6 +3226,107 @@ export default function App() {
                   </Text>
                 </Pressable>
               </View>
+
+              {showNewTaskReminderDatePicker && (
+                <View
+                  style={[
+                    styles.newTaskDatePickerContainer,
+                    {
+                      borderColor: colors.border,
+                      backgroundColor: colors.inputBackground,
+                    },
+                  ]}
+                >
+                  <DateTimePicker
+                    value={getStoredDateValue(newTaskReminderDate)}
+                    mode="date"
+                    display={Platform.OS === "ios" ? "inline" : "calendar"}
+                    onChange={(event, date) => {
+                      if (Platform.OS === "android") {
+                        setShowNewTaskReminderDatePicker(false);
+                      }
+                      if (date) {
+                        setNewTaskReminderDate(
+                          formatDateForStorage(date)
+                        );
+                      }
+                    }}
+                  />
+                  <View style={styles.datePickerActionRow}>
+                    <Pressable
+                      style={styles.newTaskDateDoneButton}
+                      onPress={() => setNewTaskReminderDate("")}
+                    >
+                      <Text
+                        style={[
+                          styles.newTaskDateDoneText,
+                          { color: colors.secondaryText },
+                        ]}
+                      >
+                        Clear
+                      </Text>
+                    </Pressable>
+                    <Pressable
+                      style={styles.newTaskDateDoneButton}
+                      onPress={() =>
+                        setShowNewTaskReminderDatePicker(false)
+                      }
+                    >
+                      <Text
+                        style={[
+                          styles.newTaskDateDoneText,
+                          { color: colors.text },
+                        ]}
+                      >
+                        Done
+                      </Text>
+                    </Pressable>
+                  </View>
+                </View>
+              )}
+
+              {showNewTaskReminderTimePicker && (
+                <View
+                  style={[
+                    styles.newTaskDatePickerContainer,
+                    {
+                      borderColor: colors.border,
+                      backgroundColor: colors.inputBackground,
+                    },
+                  ]}
+                >
+                  <DateTimePicker
+                    value={getStoredTimeValue(newTaskReminderTime)}
+                    mode="time"
+                    display={Platform.OS === "ios" ? "spinner" : "clock"}
+                    onChange={(event, date) => {
+                      if (Platform.OS === "android") {
+                        setShowNewTaskReminderTimePicker(false);
+                      }
+                      if (date) {
+                        setNewTaskReminderTime(
+                          formatTimeForStorage(date)
+                        );
+                      }
+                    }}
+                  />
+                  <Pressable
+                    style={styles.newTaskDateDoneButton}
+                    onPress={() =>
+                      setShowNewTaskReminderTimePicker(false)
+                    }
+                  >
+                    <Text
+                      style={[
+                        styles.newTaskDateDoneText,
+                        { color: colors.text },
+                      ]}
+                    >
+                      Done
+                    </Text>
+                  </Pressable>
+                </View>
+              )}
 
                   </ScrollView>
 
@@ -2688,33 +3445,80 @@ export default function App() {
                       >
                         Date of completion
                       </Text>
-                      <TextInput
+                      <Pressable
                         style={[
                           styles.workbookInput,
                           styles.additionalInput,
+                          styles.newTaskDatePickerField,
                           {
-                            color: colors.text,
                             borderColor: colors.border,
-                            backgroundColor:
-                              colors.inputBackground,
+                            backgroundColor: colors.inputBackground,
                           },
                         ]}
-                        placeholder="YYYY-MM-DD"
-                        placeholderTextColor={
-                          colors.secondaryText
+                        onPress={() =>
+                          setShowCompletionDatePicker((current) => !current)
                         }
-                        value={completionDate}
-                        onChangeText={(value) => {
-                          setCompletionDate(value);
-                          if (completionDateError) {
-                            setCompletionDateError("");
-                          }
-                        }}
-                        returnKeyType="done"
-                        onSubmitEditing={() =>
-                          Keyboard.dismiss()
-                        }
-                      />
+                      >
+                        <Text
+                          style={[
+                            styles.newTaskDatePickerText,
+                            { color: colors.text },
+                          ]}
+                        >
+                          {completionDate
+                            ? formatTaskDate(completionDate)
+                            : "Select date"}
+                        </Text>
+                        <Ionicons
+                          name="calendar-outline"
+                          size={19}
+                          color={colors.secondaryText}
+                        />
+                      </Pressable>
+                      {showCompletionDatePicker && (
+                        <View
+                          style={[
+                            styles.newTaskDatePickerContainer,
+                            {
+                              borderColor: colors.border,
+                              backgroundColor: colors.inputBackground,
+                            },
+                          ]}
+                        >
+                          <DateTimePicker
+                            value={getStoredDateValue(completionDate)}
+                            mode="date"
+                            maximumDate={new Date()}
+                            display={Platform.OS === "ios" ? "inline" : "calendar"}
+                            onChange={(event, date) => {
+                              if (Platform.OS === "android") {
+                                setShowCompletionDatePicker(false);
+                              }
+                              if (date) {
+                                setCompletionDate(
+                                  formatDateForStorage(date)
+                                );
+                                setCompletionDateError("");
+                              }
+                            }}
+                          />
+                          <Pressable
+                            style={styles.newTaskDateDoneButton}
+                            onPress={() =>
+                              setShowCompletionDatePicker(false)
+                            }
+                          >
+                            <Text
+                              style={[
+                                styles.newTaskDateDoneText,
+                                { color: colors.text },
+                              ]}
+                            >
+                              Done
+                            </Text>
+                          </Pressable>
+                        </View>
+                      )}
                       {completionDateError ? (
                         <Text
                           style={[
@@ -2747,7 +3551,17 @@ export default function App() {
                             completionDate,
                             selectedTask.repeatValue ?? "",
                             selectedTask.repeatUnit ?? "months"
-                          ) || "not defined"}
+                          ) ? (
+                            calculateNextDue(
+                              completionDate,
+                              selectedTask.repeatValue ?? "",
+                              selectedTask.repeatUnit ?? "months"
+                            )
+                          ) : (
+                            <Text style={styles.notDefinedText}>
+                              not defined
+                            </Text>
+                          )}
                         </Text>
                       </View>
 
@@ -2766,11 +3580,15 @@ export default function App() {
                             { color: colors.text },
                           ]}
                         >
-                          {selectedTask.repeatValue
-                            ? `${selectedTask.repeatValue} ${
-                                selectedTask.repeatUnit ?? ""
-                              }`
-                            : "not defined"}
+                          {selectedTask.repeatValue ? (
+                            `${selectedTask.repeatValue} ${
+                              selectedTask.repeatUnit ?? ""
+                            }`
+                          ) : (
+                            <Text style={styles.notDefinedText}>
+                              not defined
+                            </Text>
+                          )}
                         </Text>
                       </View>
                     </View>
@@ -2944,12 +3762,7 @@ export default function App() {
                                 colors.separator,
                             },
                           ]}
-                          onPress={() =>
-                            Alert.alert(
-                              "Task Record",
-                              `${formatTaskDate(record.date)}\n\n${record.report || "No report"}\n\nRecord editing will be added later.`
-                            )
-                          }
+                          onPress={() => openTaskRecord(record)}
                         >
                           <Text
                             style={[
@@ -2983,6 +3796,341 @@ export default function App() {
                     </View>
                   )}
                 </ScrollView>
+              </View>
+            </KeyboardAvoidingView>
+          </View>
+        )}
+
+      {showTaskRecord &&
+        selectedTask &&
+        selectedHistoryRecord && (
+          <View style={styles.modalOverlay}>
+            <KeyboardAvoidingView
+              style={styles.keyboardAvoidingContainer}
+              behavior={Platform.OS === "ios" ? "padding" : "height"}
+            >
+              <View
+                style={[
+                  styles.createTaskBox,
+                  styles.taskRecordWindow,
+                  {
+                    backgroundColor: colors.card,
+                    height: Math.min(
+                      FLOATING_WINDOW_MAX_HEIGHT,
+                      390
+                    ),
+                  },
+                ]}
+              >
+                <View
+                  style={[
+                    styles.taskModalHeader,
+                    { borderBottomColor: colors.separator },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.createWorkbookTitle,
+                      { color: colors.text, marginBottom: 0 },
+                    ]}
+                  >
+                    Task Record
+                  </Text>
+
+                  <View style={styles.taskRecordHeaderActions}>
+                    <Pressable
+                      style={styles.taskHeaderIconButton}
+                      onPress={openRecordEdit}
+                    >
+                      <Ionicons
+                        name="create-outline"
+                        size={21}
+                        color={colors.text}
+                      />
+                    </Pressable>
+
+                    <View style={styles.taskRecordActionSpacer} />
+
+                    <Pressable
+                      style={styles.taskCloseButtonSmall}
+                      onPress={closeTaskRecord}
+                    >
+                      <Ionicons
+                        name="close"
+                        size={18}
+                        color="#FFFFFF"
+                      />
+                    </Pressable>
+                  </View>
+                </View>
+
+                <ScrollView
+                  style={styles.taskRecordScroll}
+                  contentContainerStyle={styles.taskRecordContent}
+                  showsVerticalScrollIndicator={false}
+                >
+                  <View style={styles.taskRecordRow}>
+                    <Text style={[styles.taskRecordLabel, { color: colors.secondaryText }]}>
+                      Task name
+                    </Text>
+                    <Text style={[styles.taskRecordValue, { color: colors.text }]}>
+                      {selectedTask.name}
+                    </Text>
+                  </View>
+
+                  <View style={styles.taskRecordRow}>
+                    <Text style={[styles.taskRecordLabel, { color: colors.secondaryText }]}>
+                      Date completed
+                    </Text>
+                    <Text style={[styles.taskRecordValue, { color: colors.text }]}>
+                      {formatTaskDate(selectedHistoryRecord.date)}
+                    </Text>
+                  </View>
+
+                  <View style={styles.taskRecordReportBlock}>
+                    <Text style={[styles.taskRecordLabel, { color: colors.secondaryText }]}>
+                      Completion Report
+                    </Text>
+                    <Text style={[styles.taskRecordReport, { color: colors.text }]}>
+                      {selectedHistoryRecord.report || "—"}
+                    </Text>
+                  </View>
+                </ScrollView>
+              </View>
+            </KeyboardAvoidingView>
+          </View>
+        )}
+
+      {showRecordEdit &&
+        selectedTask &&
+        selectedHistoryRecord && (
+          <View style={styles.modalOverlay}>
+            <KeyboardAvoidingView
+              style={styles.keyboardAvoidingContainer}
+              behavior={Platform.OS === "ios" ? "padding" : "height"}
+            >
+              <View
+                style={[
+                  styles.recordEditWindow,
+                  {
+                    backgroundColor: colors.card,
+                    height: Math.min(
+                      FLOATING_WINDOW_MAX_HEIGHT,
+                      430
+                    ),
+                  },
+                ]}
+              >
+                <View
+                  style={[
+                    styles.taskModalHeader,
+                    { borderBottomColor: colors.separator },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.createWorkbookTitle,
+                      { color: colors.text, marginBottom: 0 },
+                    ]}
+                  >
+                    Record Edit
+                  </Text>
+
+                  <Pressable
+                    style={styles.taskCloseButtonSmall}
+                    onPress={closeRecordEdit}
+                  >
+                    <Ionicons name="close" size={18} color="#FFFFFF" />
+                  </Pressable>
+                </View>
+
+                <ScrollView
+                  style={styles.recordEditScroll}
+                  contentContainerStyle={styles.recordEditContent}
+                  keyboardShouldPersistTaps="handled"
+                  showsVerticalScrollIndicator={false}
+                >
+                  <View style={styles.recordEditFirstRow}>
+                    <View style={styles.recordEditFirstColumn}>
+                      <Text
+                        style={[
+                          styles.taskRecordLabel,
+                          { color: colors.secondaryText },
+                        ]}
+                      >
+                        Task name
+                      </Text>
+                      <Text
+                        style={[
+                          styles.taskRecordValue,
+                          { color: colors.text },
+                        ]}
+                      >
+                        {selectedTask.name}
+                      </Text>
+                    </View>
+
+                    <View style={styles.recordEditSecondColumn}>
+                      <Text
+                        style={[
+                          styles.taskRecordLabel,
+                          { color: colors.secondaryText },
+                        ]}
+                      >
+                        Location
+                      </Text>
+                      <Text
+                        style={[
+                          styles.taskRecordValue,
+                          { color: colors.text },
+                        ]}
+                      >
+                        {selectedTask.location || "not defined"}
+                      </Text>
+                    </View>
+                  </View>
+
+                  <View style={styles.recordEditRow}>
+                    <Text
+                      style={[
+                        styles.taskRecordLabel,
+                        { color: colors.secondaryText },
+                      ]}
+                    >
+                      Completion Date
+                    </Text>
+                    <Pressable
+                      style={[
+                        styles.recordEditDateInput,
+                        styles.datePickerCompactField,
+                        {
+                          borderColor: colors.separator,
+                          backgroundColor: colors.inputBackground,
+                        },
+                      ]}
+                      onPress={() =>
+                        setShowRecordEditDatePicker((current) => !current)
+                      }
+                    >
+                      <Text
+                        style={[
+                          styles.datePickerCompactText,
+                          { color: colors.text },
+                        ]}
+                      >
+                        {recordEditDate
+                          ? formatTaskDate(recordEditDate)
+                          : "Select date"}
+                      </Text>
+                      <Ionicons
+                        name="calendar-outline"
+                        size={17}
+                        color={colors.secondaryText}
+                      />
+                    </Pressable>
+                    {showRecordEditDatePicker && (
+                      <View
+                        style={[
+                          styles.newTaskDatePickerContainer,
+                          {
+                            borderColor: colors.border,
+                            backgroundColor: colors.inputBackground,
+                          },
+                        ]}
+                      >
+                        <DateTimePicker
+                          value={getStoredDateValue(recordEditDate)}
+                          mode="date"
+                          maximumDate={new Date()}
+                          display={Platform.OS === "ios" ? "inline" : "calendar"}
+                          onChange={(event, date) => {
+                            if (Platform.OS === "android") {
+                              setShowRecordEditDatePicker(false);
+                            }
+                            if (date) {
+                              setRecordEditDate(
+                                formatDateForStorage(date)
+                              );
+                              setRecordEditDateError("");
+                            }
+                          }}
+                        />
+                        <Pressable
+                          style={styles.newTaskDateDoneButton}
+                          onPress={() =>
+                            setShowRecordEditDatePicker(false)
+                          }
+                        >
+                          <Text
+                            style={[
+                              styles.newTaskDateDoneText,
+                              { color: colors.text },
+                            ]}
+                          >
+                            Done
+                          </Text>
+                        </Pressable>
+                      </View>
+                    )}
+                    {recordEditDateError ? (
+                      <Text
+                        style={[
+                          styles.prewarningErrorText,
+                          { color: colors.error },
+                        ]}
+                      >
+                        {recordEditDateError}
+                      </Text>
+                    ) : null}
+                  </View>
+
+                  <View style={styles.recordEditReportBlock}>
+                    <Text
+                      style={[
+                        styles.taskRecordLabel,
+                        { color: colors.secondaryText },
+                      ]}
+                    >
+                      Completion Report
+                    </Text>
+                    <TextInput
+                      style={[
+                        styles.recordEditReportInput,
+                        {
+                          color: colors.text,
+                          borderColor: colors.separator,
+                        },
+                      ]}
+                      value={recordEditReport}
+                      onChangeText={setRecordEditReport}
+                      multiline
+                      textAlignVertical="top"
+                      placeholder="Report"
+                      placeholderTextColor={colors.secondaryText}
+                    />
+                  </View>
+                </ScrollView>
+
+                <View
+                  style={[
+                    styles.taskModalFooter,
+                    { borderTopColor: colors.separator },
+                  ]}
+                >
+                  <View style={styles.taskModalButtons}>
+                    <Pressable
+                      style={[
+                        styles.modalButton,
+                        styles.createButton,
+                      ]}
+                      onPress={saveRecordEdit}
+                    >
+                      <Text style={styles.createButtonText}>
+                        Save
+                      </Text>
+                    </Pressable>
+                  </View>
+                </View>
               </View>
             </KeyboardAvoidingView>
           </View>
@@ -3458,6 +4606,10 @@ const styles = StyleSheet.create({
     fontSize: 13,
   },
 
+  notDefinedText: {
+    fontStyle: "italic",
+  },
+
   unallocatedText: {
     fontStyle: "italic",
   },
@@ -3600,6 +4752,11 @@ const styles = StyleSheet.create({
   },
 
   taskInfoColumn: {
+    flex: 2,
+    minWidth: 0,
+  },
+
+  taskInfoColumnRight: {
     flex: 1,
     minWidth: 0,
   },
@@ -3753,6 +4910,11 @@ const styles = StyleSheet.create({
     marginTop: 5,
   },
 
+  prewarningErrorText: {
+    fontSize: 12,
+    marginTop: 5,
+  },
+
   completeTaskRow: {
     flexDirection: "row",
     gap: 12,
@@ -3761,6 +4923,126 @@ const styles = StyleSheet.create({
 
   completeTaskColumn: {
     flex: 1,
+  },
+
+  recordEditWindow: {
+    width: "100%",
+    maxWidth: 500,
+    maxHeight: FLOATING_WINDOW_MAX_HEIGHT,
+    borderRadius: 18,
+    paddingHorizontal: 18,
+    paddingTop: 10,
+    paddingBottom: 0,
+    flexDirection: "column",
+  },
+
+  recordEditScroll: {
+    flex: 1,
+    minHeight: 0,
+  },
+
+  recordEditContent: {
+    paddingTop: 2,
+    paddingBottom: 10,
+  },
+
+  recordEditFirstRow: {
+    flexDirection: "row",
+    gap: 14,
+    paddingVertical: 6,
+  },
+
+  recordEditFirstColumn: {
+    flex: 2,
+    minWidth: 0,
+  },
+
+  recordEditSecondColumn: {
+    flex: 1,
+    minWidth: 0,
+  },
+
+  recordEditRow: {
+    paddingVertical: 6,
+  },
+
+  recordEditReportBlock: {
+    paddingVertical: 6,
+  },
+
+  recordEditDateInput: {
+    height: 40,
+    minWidth: 145,
+    maxWidth: 190,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    fontSize: 15,
+  },
+
+  recordEditReportInput: {
+    minHeight: 120,
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    fontSize: 15,
+    marginTop: 3,
+  },
+
+  taskRecordWindow: {
+    width: "100%",
+    maxWidth: 500,
+    maxHeight: FLOATING_WINDOW_MAX_HEIGHT,
+    borderRadius: 18,
+    paddingHorizontal: 18,
+    paddingTop: 10,
+    paddingBottom: 7,
+    flexDirection: "column",
+    flexShrink: 1,
+  },
+
+  taskRecordHeaderActions: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+
+  taskRecordActionSpacer: {
+    width: 28,
+  },
+
+  taskRecordScroll: {
+    flex: 1,
+    minHeight: 0,
+  },
+
+  taskRecordContent: {
+    paddingTop: 2,
+    paddingBottom: 12,
+  },
+
+  taskRecordRow: {
+    paddingVertical: 6,
+  },
+
+  taskRecordLabel: {
+    fontSize: 12,
+    marginBottom: 2,
+  },
+
+  taskRecordValue: {
+    fontSize: 15,
+    lineHeight: 21,
+  },
+
+  taskRecordReportBlock: {
+    paddingVertical: 6,
+  },
+
+  taskRecordReport: {
+    fontSize: 15,
+    lineHeight: 21,
+    marginTop: 5,
   },
 
   taskHistoryWindow: {
@@ -3833,7 +5115,7 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     paddingHorizontal: 18,
     paddingTop: 10,
-    paddingBottom: 7,
+    paddingBottom: 0,
     flexDirection: "column",
     flexShrink: 1,
   },
@@ -3864,6 +5146,8 @@ const styles = StyleSheet.create({
   taskDetailsCompleteFooter: {
     justifyContent: "flex-end",
     width: "100%",
+    height: 43,
+    alignItems: "center",
   },
 
   taskHeaderActionSpacer: {
@@ -3886,7 +5170,7 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     paddingHorizontal: 18,
     paddingTop: 10,
-    paddingBottom: 7,
+    paddingBottom: 0,
     flexDirection: "column",
   },
 
@@ -4013,7 +5297,8 @@ const styles = StyleSheet.create({
 
   taskModalFooter: {
     borderTopWidth: StyleSheet.hairlineWidth,
-    paddingTop: 5,
+    paddingTop: 10,
+    paddingBottom: 10,
     marginTop: 2,
   },
 
@@ -4021,9 +5306,10 @@ const styles = StyleSheet.create({
     position: "absolute",
     left: 18,
     right: 18,
-    bottom: 7,
+    bottom: 0,
     borderTopWidth: StyleSheet.hairlineWidth,
-    paddingTop: 5,
+    paddingTop: 10,
+    paddingBottom: 10,
     backgroundColor: "transparent",
     zIndex: 10,
   },
@@ -4064,6 +5350,53 @@ const styles = StyleSheet.create({
     fontSize: 22,
     fontWeight: "700",
     marginBottom: 18,
+  },
+
+  newTaskDatePickerField: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+
+  newTaskDatePickerText: {
+    fontSize: 15,
+  },
+
+  newTaskDatePickerContainer: {
+    borderWidth: 1,
+    borderRadius: 10,
+    marginTop: 6,
+    marginBottom: 4,
+    alignItems: "center",
+    overflow: "hidden",
+  },
+
+  newTaskDateDoneButton: {
+    paddingHorizontal: 18,
+    paddingVertical: 8,
+    alignSelf: "flex-end",
+  },
+
+  newTaskDateDoneText: {
+    fontSize: 15,
+    fontWeight: "600",
+  },
+
+  datePickerActionRow: {
+    width: "100%",
+    flexDirection: "row",
+    justifyContent: "flex-end",
+  },
+
+  datePickerCompactField: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+
+  datePickerCompactText: {
+    fontSize: 14,
+    flex: 1,
   },
 
   workbookInput: {
