@@ -6,6 +6,7 @@ import {
   Dimensions,
   Keyboard,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   Pressable,
   SafeAreaView,
@@ -19,7 +20,7 @@ import {
   useColorScheme,
 } from "react-native";
 
-type TaskStatus = "red" | "orange" | "blue" | "green";
+type TaskStatus = "red" | "orange" | "blue" | "green" | "gray";
 
 type TaskHistoryRecord = {
   date: string;
@@ -233,6 +234,61 @@ function formatTaskDate(date?: string) {
   }).format(parsed);
 }
 
+function calculateTaskStatus(
+  date?: string,
+  prewarning?: string
+): TaskStatus {
+  // A task without a due date is always considered Due.
+  if (!date) return "orange";
+
+  const parts = date.split("-").map(Number);
+  if (
+    parts.length !== 3 ||
+    parts.some((part) => !Number.isFinite(part))
+  ) {
+    return "gray";
+  }
+
+  const [year, month, day] = parts;
+  const dueDate = new Date(year, month - 1, day);
+
+  if (
+    dueDate.getFullYear() !== year ||
+    dueDate.getMonth() !== month - 1 ||
+    dueDate.getDate() !== day
+  ) {
+    return "gray";
+  }
+
+  const now = new Date();
+  const today = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate()
+  );
+
+  const daysUntilDue = Math.round(
+    (dueDate.getTime() - today.getTime()) / 86400000
+  );
+
+  // The day after the due date and every day after it is Overdue.
+  if (daysUntilDue < 0) return "red";
+
+  const warningDays = Number(prewarning);
+
+  // A valid prewarning defines both the Due and Upcoming windows.
+  if (Number.isFinite(warningDays) && warningDays >= 1) {
+    if (daysUntilDue <= warningDays) return "orange";
+    if (daysUntilDue <= warningDays * 2) return "blue";
+    return "gray";
+  }
+
+  // Without a prewarning, there is no Upcoming window.
+  // Today is Due; future dates are simply "all others".
+  if (daysUntilDue === 0) return "orange";
+  return "gray";
+}
+
 function calculateNextDue(
   date?: string,
   repeatValue?: string,
@@ -316,6 +372,27 @@ export default function App() {
     useState<string | null>(null);
   const [selectedLocation, setSelectedLocation] =
     useState<string>("All");
+
+  const [showSearchScreen, setShowSearchScreen] = useState(false);
+  const [showSearchWorkbookPicker, setShowSearchWorkbookPicker] = useState(false);
+  const [showSearchLocationPicker, setShowSearchLocationPicker] = useState(false);
+  const [searchWorkbookId, setSearchWorkbookId] = useState<string>("all");
+  const [searchLocation, setSearchLocation] = useState<string>("All");
+  const [searchDateMode, setSearchDateMode] =
+    useState<"all" | "specific" | "between" | "lastWeek" | "lastMonth" | "lastYear">("all");
+  const [showSearchDateModePicker, setShowSearchDateModePicker] = useState(false);
+  const [searchDate, setSearchDate] = useState("");
+  const [searchDateFrom, setSearchDateFrom] = useState("");
+  const [searchDateTo, setSearchDateTo] = useState("");
+  const [searchDatePickerTarget, setSearchDatePickerTarget] =
+    useState<"specific" | "from" | "to" | null>(null);
+  const [showSearchDatePicker, setShowSearchDatePicker] = useState(false);
+  const [searchIncludeHistory, setSearchIncludeHistory] = useState(false);
+  const [searchStatus, setSearchStatus] =
+    useState<Array<"red" | "orange" | "blue" | "green">>([]);
+  const [showSearchStatusPicker, setShowSearchStatusPicker] = useState(false);
+  const [searchText, setSearchText] = useState("");
+  const [searchHasRun, setSearchHasRun] = useState(false);
 
   const [selectedTaskId, setSelectedTaskId] =
     useState<string | null>(null);
@@ -510,7 +587,8 @@ export default function App() {
       red: 0,
       orange: 1,
       blue: 2,
-      green: 3,
+      gray: 3,
+      green: 4,
     };
 
     return [...filtered].sort((a, b) => {
@@ -520,8 +598,11 @@ export default function App() {
 
       if (updatePriority !== 0) return updatePriority;
 
+      const aStatus = calculateTaskStatus(a.date, a.prewarning);
+      const bStatus = calculateTaskStatus(b.date, b.prewarning);
+
       const statusDifference =
-        statusPriority[a.status] - statusPriority[b.status];
+        statusPriority[aStatus] - statusPriority[bStatus];
 
       if (statusDifference !== 0) return statusDifference;
 
@@ -572,6 +653,7 @@ export default function App() {
   const goHome = () => {
     setSelectedWorkbookId(null);
     setSelectedTaskId(null);
+    setShowSearchScreen(false);
   };
   const changeWorkbookColor = (
     workbookId: string,
@@ -917,10 +999,302 @@ export default function App() {
   };
 
   const openSearch = () => {
-    Alert.alert(
-      "Search",
-      "Search functionality will be added later."
+    setShowSearchScreen(true);
+    setSearchWorkbookId("all");
+    setSearchLocation("All");
+    setSearchDateMode("all");
+    setSearchDate("");
+    setSearchDateFrom("");
+    setSearchDateTo("");
+    setSearchIncludeHistory(false);
+    setSearchStatus([]);
+    setSearchText("");
+    setSearchHasRun(false);
+  };
+
+  const closeSearch = () => {
+    setShowSearchScreen(false);
+  };
+
+  const searchLocations = useMemo(() => {
+    const tasks = searchWorkbookId === "all"
+      ? Object.values(tasksByWorkbook).flat()
+      : tasksByWorkbook[searchWorkbookId] ?? [];
+
+    const map = new Map<string, string>();
+    tasks.forEach((task) => {
+      const label = task.location?.trim() || "Unallocated";
+      map.set(label.toLowerCase(), label);
+    });
+
+    return [...map.values()].sort((a, b) =>
+      a.localeCompare(b, undefined, { sensitivity: "base" })
     );
+  }, [searchWorkbookId, tasksByWorkbook]);
+
+  const searchDateRange = useMemo(() => {
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+    const toISODate = (value: Date) => {
+      const y = value.getFullYear();
+      const m = String(value.getMonth() + 1).padStart(2, "0");
+      const d = String(value.getDate()).padStart(2, "0");
+      return `${y}-${m}-${d}`;
+    };
+
+    if (searchDateMode === "specific" && searchDate) {
+      return { from: searchDate, to: searchDate };
+    }
+
+    if (searchDateMode === "between" && searchDateFrom && searchDateTo) {
+      return searchDateFrom <= searchDateTo
+        ? { from: searchDateFrom, to: searchDateTo }
+        : { from: searchDateTo, to: searchDateFrom };
+    }
+
+    if (searchDateMode === "lastWeek") {
+      const day = today.getDay();
+      const currentMondayOffset = day === 0 ? -6 : 1 - day;
+      const currentMonday = new Date(today);
+      currentMonday.setDate(today.getDate() + currentMondayOffset);
+
+      const previousMonday = new Date(currentMonday);
+      previousMonday.setDate(currentMonday.getDate() - 7);
+
+      const previousSunday = new Date(previousMonday);
+      previousSunday.setDate(previousMonday.getDate() + 6);
+
+      return {
+        from: toISODate(previousMonday),
+        to: toISODate(previousSunday),
+      };
+    }
+
+    if (searchDateMode === "lastMonth") {
+      const first = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+      const last = new Date(today.getFullYear(), today.getMonth(), 0);
+      return {
+        from: toISODate(first),
+        to: toISODate(last),
+      };
+    }
+
+    if (searchDateMode === "lastYear") {
+      const first = new Date(today.getFullYear() - 1, 0, 1);
+      const last = new Date(today.getFullYear() - 1, 11, 31);
+      return {
+        from: toISODate(first),
+        to: toISODate(last),
+      };
+    }
+
+    return null;
+  }, [searchDateMode, searchDate, searchDateFrom, searchDateTo]);
+
+  const searchResults = useMemo(() => {
+    if (!searchHasRun) return [];
+
+    const workbookMap = new Map(
+      workbooks.map((workbook) => [workbook.id, workbook])
+    );
+
+    const words = searchText
+      .trim()
+      .toLowerCase()
+      .split(/\s+/)
+      .filter(Boolean);
+
+    const selectedStatuses =
+      searchStatus.length === 0
+        ? new Set(["red", "orange", "blue", "green"])
+        : new Set(searchStatus);
+
+    const results: Array<{
+      workbookId: string;
+      workbookName: string;
+      location: string;
+      name: string;
+      date: string;
+      status: TaskStatus;
+      history: boolean;
+    }> = [];
+
+    const sourceWorkbooks =
+      searchWorkbookId === "all"
+        ? workbooks
+        : workbooks.filter((workbook) => workbook.id === searchWorkbookId);
+
+    sourceWorkbooks.forEach((workbook) => {
+      (tasksByWorkbook[workbook.id] ?? []).forEach((task) => {
+        const location = task.location?.trim() || "Unallocated";
+        const locationMatches =
+          searchLocation === "All" ||
+          location.toLowerCase() === searchLocation.toLowerCase();
+
+        if (!locationMatches) return;
+
+        const taskName = task.name.toLowerCase();
+        if (words.length && !words.every((word) => taskName.includes(word))) {
+          return;
+        }
+
+        const taskStatus = calculateTaskStatus(task.date, task.prewarning);
+
+        // The four explicit status filters never include "normal" (gray).
+        // Normal tasks are included only when Status = ALL.
+        if (
+          searchStatus.length > 0 &&
+          (taskStatus === "gray" || !selectedStatuses.has(taskStatus))
+        ) {
+          return;
+        }
+
+        if (searchDateRange) {
+          if (
+            !task.date ||
+            task.date < searchDateRange.from ||
+            task.date > searchDateRange.to
+          ) {
+            return;
+          }
+        }
+
+        results.push({
+          workbookId: workbook.id,
+          workbookName: workbook.name,
+          location,
+          name: task.name,
+          date: task.date || "",
+          status: taskStatus,
+          history: false,
+        });
+
+        if (searchIncludeHistory) {
+          (task.history ?? []).forEach((record) => {
+            if (searchDateRange) {
+              if (
+                record.date < searchDateRange.from ||
+                record.date > searchDateRange.to
+              ) {
+                return;
+              }
+            }
+
+            if (
+              words.length &&
+              !words.every((word) =>
+                task.name.toLowerCase().includes(word)
+              )
+            ) {
+              return;
+            }
+
+            if (!selectedStatuses.has("green")) return;
+
+            results.push({
+              workbookId: workbook.id,
+              workbookName: workbook.name,
+              location,
+              name: task.name,
+              date: record.date,
+              status: "green",
+              history: true,
+            });
+          });
+        }
+      });
+    });
+
+    return results.sort((a, b) => {
+      const workbookCompare = a.workbookName.localeCompare(
+        b.workbookName,
+        undefined,
+        { sensitivity: "base" }
+      );
+      if (workbookCompare !== 0) return workbookCompare;
+
+      const locationCompare = a.location.localeCompare(
+        b.location,
+        undefined,
+        { sensitivity: "base" }
+      );
+      if (locationCompare !== 0) return locationCompare;
+
+      return (a.date || "9999-12-31").localeCompare(
+        b.date || "9999-12-31"
+      );
+    });
+  }, [
+    searchHasRun,
+    searchWorkbookId,
+    searchLocation,
+    searchDateRange,
+    searchIncludeHistory,
+    searchStatus,
+    searchText,
+    tasksByWorkbook,
+    workbooks,
+  ]);
+
+  const searchDatePickerValue = () => {
+    const value =
+      searchDatePickerTarget === "from"
+        ? searchDateFrom
+        : searchDatePickerTarget === "to"
+        ? searchDateTo
+        : searchDate;
+    return getStoredDateValue(value);
+  };
+
+  const handleSearchDateSelected = (date: Date) => {
+    const value = formatDateForStorage(date);
+
+    if (searchDatePickerTarget === "from") {
+      setSearchDateFrom(value);
+      if (searchDateTo && value > searchDateTo) {
+        setSearchDateTo("");
+      }
+    } else if (searchDatePickerTarget === "to") {
+      setSearchDateTo(value);
+      if (searchDateFrom && value < searchDateFrom) {
+        setSearchDateFrom("");
+      }
+    } else {
+      setSearchDate(value);
+    }
+
+    setShowSearchDatePicker(false);
+  };
+
+  const statusLabel = (status: "red" | "orange" | "blue" | "green") =>
+    status === "red"
+      ? "OVERDUE"
+      : status === "orange"
+      ? "DUE"
+      : status === "blue"
+      ? "UPCOMING"
+      : "COMPLETED";
+
+  const statusColor = (status: TaskStatus) =>
+    status === "red"
+      ? "#E53935"
+      : status === "orange"
+      ? "#F39C12"
+      : status === "blue"
+      ? "#1976D2"
+      : status === "green"
+      ? "#43A047"
+      : "#9E9E9E";
+
+  const runSearch = () => {
+    Keyboard.dismiss();
+    setShowSearchDatePicker(false);
+    setShowSearchDateModePicker(false);
+    setShowSearchStatusPicker(false);
+    setShowSearchWorkbookPicker(false);
+    setShowSearchLocationPicker(false);
+    setSearchHasRun(true);
   };
 
   const createWorkbook = () => {
@@ -1135,7 +1509,10 @@ export default function App() {
           : undefined,
       description:
         newTaskDescription.trim() || undefined,
-      status: "orange",
+      status: calculateTaskStatus(
+        newTaskDate.trim() || undefined,
+        newTaskPrewarning.trim() || undefined
+      ),
     };
 
     setTasksByWorkbook((current) => ({
@@ -1380,9 +1757,23 @@ export default function App() {
                         color={colors.secondaryText}
                       />
                     </Pressable>
-                    {showEditTaskDatePicker && (
+                    <Modal
+  visible={showEditTaskDatePicker}
+  transparent
+  animationType="fade"
+  onRequestClose={() => setShowEditTaskDatePicker(false)}
+>
+  <Pressable
+    style={styles.pickerModalOverlay}
+    onPress={() => setShowEditTaskDatePicker(false)}
+  >
+    <Pressable
+      style={styles.pickerModalPopupPressable}
+      onPress={(event) => event.stopPropagation()}
+    >
                       <View
                         style={[
+                          styles.pickerModalCard,
                           styles.newTaskDatePickerContainer,
                           {
                             borderColor: colors.border,
@@ -1390,6 +1781,17 @@ export default function App() {
                           },
                         ]}
                       >
+                         <View style={[styles.pickerModalTitleContainer, { borderBottomColor: colors.border }]}>
+                         <Text style={[styles.pickerModalTitle, { color: colors.text }]}>
+                           Due Date
+                         </Text>
+                         </View>
+                         <View
+                           style={[
+                             styles.pickerModalSeparator,
+                             { backgroundColor: colors.border },
+                           ]}
+                         />
                         <DateTimePicker
                           value={getStoredDateValue(editTaskDate)}
                           mode="date"
@@ -1402,6 +1804,12 @@ export default function App() {
                               setEditTaskDate(formatDateForStorage(date));
                             }
                           }}
+                        />
+                        <View
+                          style={[
+                            styles.pickerModalFooterSeparator,
+                            { backgroundColor: colors.border },
+                          ]}
                         />
                         <View style={styles.datePickerActionRow}>
                           <Pressable
@@ -1432,7 +1840,10 @@ export default function App() {
                           </Pressable>
                         </View>
                       </View>
-                    )}
+                    
+    </Pressable>
+  </Pressable>
+</Modal>
 
                     {editTaskDate.trim() !== "" && (
                       <>
@@ -1529,9 +1940,23 @@ export default function App() {
                       </Text>
                     </View>
 
-                    {showEditTaskReminderTimePicker && (
+                    <Modal
+  visible={showEditTaskReminderTimePicker}
+  transparent
+  animationType="fade"
+  onRequestClose={() => setShowEditTaskReminderTimePicker(false)}
+>
+  <Pressable
+    style={styles.pickerModalOverlay}
+    onPress={() => setShowEditTaskReminderTimePicker(false)}
+  >
+    <Pressable
+      style={styles.pickerModalPopupPressable}
+      onPress={(event) => event.stopPropagation()}
+    >
                       <View
                         style={[
+                          styles.pickerModalCard,
                           styles.newTaskDatePickerContainer,
                           {
                             borderColor: colors.border,
@@ -1539,6 +1964,17 @@ export default function App() {
                           },
                         ]}
                       >
+                         <View style={[styles.pickerModalTitleContainer, { borderBottomColor: colors.border }]}>
+                         <Text style={[styles.pickerModalTitle, { color: colors.text }]}>
+                           Reminder Time
+                         </Text>
+                         </View>
+                         <View
+                           style={[
+                             styles.pickerModalSeparator,
+                             { backgroundColor: colors.border },
+                           ]}
+                         />
                         <DateTimePicker
                           value={getStoredTimeValue(editTaskReminderTime)}
                           mode="time"
@@ -1553,6 +1989,12 @@ export default function App() {
                               );
                             }
                           }}
+                        />
+                        <View
+                          style={[
+                            styles.pickerModalFooterSeparator,
+                            { backgroundColor: colors.border },
+                          ]}
                         />
                         <Pressable
                           style={styles.newTaskDateDoneButton}
@@ -1570,7 +2012,10 @@ export default function App() {
                           </Text>
                         </Pressable>
                       </View>
-                    )}
+                    
+    </Pressable>
+  </Pressable>
+</Modal>
 
                     <Text style={[styles.taskFieldLabel, { color: colors.secondaryText }]}>
                       Description
@@ -1684,9 +2129,23 @@ export default function App() {
                         </Text>
                       </Pressable>
                     </View>
-                    {showEditTaskReminderDatePicker && (
+                    <Modal
+  visible={showEditTaskReminderDatePicker}
+  transparent
+  animationType="fade"
+  onRequestClose={() => setShowEditTaskReminderDatePicker(false)}
+>
+  <Pressable
+    style={styles.pickerModalOverlay}
+    onPress={() => setShowEditTaskReminderDatePicker(false)}
+  >
+    <Pressable
+      style={styles.pickerModalPopupPressable}
+      onPress={(event) => event.stopPropagation()}
+    >
                       <View
                         style={[
+                          styles.pickerModalCard,
                           styles.newTaskDatePickerContainer,
                           {
                             borderColor: colors.border,
@@ -1694,6 +2153,17 @@ export default function App() {
                           },
                         ]}
                       >
+                         <View style={[styles.pickerModalTitleContainer, { borderBottomColor: colors.border }]}>
+                         <Text style={[styles.pickerModalTitle, { color: colors.text }]}>
+                           Reminder Date
+                         </Text>
+                         </View>
+                         <View
+                           style={[
+                             styles.pickerModalSeparator,
+                             { backgroundColor: colors.border },
+                           ]}
+                         />
                         <DateTimePicker
                           value={getStoredDateValue(editTaskReminderDate)}
                           mode="date"
@@ -1708,6 +2178,12 @@ export default function App() {
                               );
                             }
                           }}
+                        />
+                        <View
+                          style={[
+                            styles.pickerModalFooterSeparator,
+                            { backgroundColor: colors.border },
+                          ]}
                         />
                         <View style={styles.datePickerActionRow}>
                           <Pressable
@@ -1740,7 +2216,10 @@ export default function App() {
                           </Pressable>
                         </View>
                       </View>
-                    )}
+                    
+    </Pressable>
+  </Pressable>
+</Modal>
                   </>
                 ) : (
                   <>
@@ -2032,9 +2511,651 @@ export default function App() {
         </Pressable>
       </View>
 
+      {/* SEARCH FILTER PICKERS */}
+
+      <Modal
+        visible={showSearchWorkbookPicker}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowSearchWorkbookPicker(false)}
+      >
+        <Pressable
+          style={styles.pickerModalOverlay}
+          onPress={() => setShowSearchWorkbookPicker(false)}
+        >
+          <Pressable
+            style={[
+              styles.pickerModalCard,
+              {
+                backgroundColor: colors.inputBackground,
+                borderColor: colors.border,
+              },
+            ]}
+            onPress={(event) => event.stopPropagation()}
+          >
+            <Text style={[styles.pickerModalTitle, { color: colors.text }]}>
+              Workbook
+            </Text>
+            <View style={[styles.pickerModalSeparator, { backgroundColor: colors.border }]} />
+            <ScrollView style={styles.searchPickerList}>
+              {[
+                { id: "all", name: "ALL" },
+                ...[...workbooks].sort((a,b) =>
+                  a.name.localeCompare(b.name, undefined, { sensitivity: "base" })
+                ),
+              ].map((workbook) => (
+                <Pressable
+                  key={workbook.id}
+                  style={styles.searchPickerOption}
+                  onPress={() => {
+                    setSearchWorkbookId(workbook.id);
+                    setSearchLocation("All");
+                    setShowSearchWorkbookPicker(false);
+                  }}
+                >
+                  <Text
+                    style={[
+                      styles.searchPickerOptionText,
+                      { color: colors.text },
+                    ]}
+                  >
+                    {workbook.name}
+                  </Text>
+                  {(searchWorkbookId === workbook.id ||
+                    (workbook.id === "all" && searchWorkbookId === "all")) && (
+                    <Ionicons name="checkmark" size={19} color="#1976D2" />
+                  )}
+                </Pressable>
+              ))}
+            </ScrollView>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      <Modal
+        visible={showSearchLocationPicker}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowSearchLocationPicker(false)}
+      >
+        <Pressable
+          style={styles.pickerModalOverlay}
+          onPress={() => setShowSearchLocationPicker(false)}
+        >
+          <Pressable
+            style={[
+              styles.pickerModalCard,
+              {
+                backgroundColor: colors.inputBackground,
+                borderColor: colors.border,
+              },
+            ]}
+            onPress={(event) => event.stopPropagation()}
+          >
+            <Text style={[styles.pickerModalTitle, { color: colors.text }]}>
+              Location
+            </Text>
+            <View style={[styles.pickerModalSeparator, { backgroundColor: colors.border }]} />
+            <ScrollView style={styles.searchPickerList}>
+              {["All", ...searchLocations].map((location) => (
+                <Pressable
+                  key={location}
+                  style={styles.searchPickerOption}
+                  onPress={() => {
+                    setSearchLocation(location);
+                    setShowSearchLocationPicker(false);
+                  }}
+                >
+                  <Text style={[styles.searchPickerOptionText, { color: colors.text }]}>
+                    {location === "All" ? "ALL" : location}
+                  </Text>
+                  {searchLocation.toLowerCase() === location.toLowerCase() && (
+                    <Ionicons name="checkmark" size={19} color="#1976D2" />
+                  )}
+                </Pressable>
+              ))}
+            </ScrollView>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      <Modal
+        visible={showSearchDateModePicker}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowSearchDateModePicker(false)}
+      >
+        <Pressable
+          style={styles.pickerModalOverlay}
+          onPress={() => setShowSearchDateModePicker(false)}
+        >
+          <Pressable
+            style={[
+              styles.pickerModalCard,
+              {
+                backgroundColor: colors.inputBackground,
+                borderColor: colors.border,
+              },
+            ]}
+            onPress={(event) => event.stopPropagation()}
+          >
+            <Text style={[styles.pickerModalTitle, { color: colors.text }]}>
+              Date
+            </Text>
+            <View style={[styles.pickerModalSeparator, { backgroundColor: colors.border }]} />
+            {[
+              ["all", "ALL"],
+              ["specific", "Specific date"],
+              ["between", "From - To"],
+              ["lastWeek", "Last week"],
+              ["lastMonth", "Last month"],
+              ["lastYear", "Last year"],
+            ].map(([value, label]) => (
+              <Pressable
+                key={value}
+                style={styles.searchPickerOption}
+                onPress={() => {
+                  setSearchDateMode(value as typeof searchDateMode);
+                  setShowSearchDateModePicker(false);
+                  if (value === "all") {
+                    setSearchDate("");
+                    setSearchDateFrom("");
+                    setSearchDateTo("");
+                  }
+                }}
+              >
+                <Text style={[styles.searchPickerOptionText, { color: colors.text }]}>
+                  {label}
+                </Text>
+                {searchDateMode === value && (
+                  <Ionicons name="checkmark" size={19} color="#1976D2" />
+                )}
+              </Pressable>
+            ))}
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      <Modal
+        visible={showSearchStatusPicker}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowSearchStatusPicker(false)}
+      >
+        <Pressable
+          style={styles.pickerModalOverlay}
+          onPress={() => setShowSearchStatusPicker(false)}
+        >
+          <Pressable
+            style={[
+              styles.pickerModalCard,
+              {
+                backgroundColor: colors.inputBackground,
+                borderColor: colors.border,
+              },
+            ]}
+            onPress={(event) => event.stopPropagation()}
+          >
+            <Text style={[styles.pickerModalTitle, { color: colors.text }]}>
+              Status
+            </Text>
+            <View style={[styles.pickerModalSeparator, { backgroundColor: colors.border }]} />
+            {[
+              ["all", "ALL"],
+              ["red", "OVERDUE"],
+              ["orange", "DUE"],
+              ["blue", "UPCOMING"],
+              ["green", "COMPLETED"],
+            ].map(([value, label]) => {
+              const isAll = value === "all";
+              const checked = isAll
+                ? searchStatus.length === 0
+                : searchStatus.includes(value as "red" | "orange" | "blue" | "green");
+
+              return (
+                <Pressable
+                  key={value}
+                  style={styles.searchPickerOption}
+                  onPress={() => {
+                    if (isAll) {
+                      setSearchStatus([]);
+                    } else {
+                      setSearchStatus((current) => {
+                        const status = value as "red" | "orange" | "blue" | "green";
+                        return current.includes(status)
+                          ? current.filter((item) => item !== status)
+                          : [...current, status];
+                      });
+                    }
+                  }}
+                >
+                  <View style={styles.searchPickerCheckBox}>
+                    <View
+                      style={[
+                        styles.searchCheckbox,
+                        {
+                          borderColor: colors.border,
+                          backgroundColor: checked
+                            ? "#1976D2"
+                            : colors.inputBackground,
+                        },
+                      ]}
+                    >
+                      {checked && (
+                        <Ionicons name="checkmark" size={14} color="#FFFFFF" />
+                      )}
+                    </View>
+                    <Text style={[styles.searchPickerOptionText, { color: colors.text }]}>
+                      {label}
+                    </Text>
+                  </View>
+                </Pressable>
+              );
+            })}
+            <Pressable
+              style={styles.pickerModalDoneButton}
+              onPress={() => setShowSearchStatusPicker(false)}
+            >
+              <Text style={[styles.newTaskDateDoneText, { color: colors.text }]}>
+                Done
+              </Text>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      <Modal
+        visible={showSearchDatePicker}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowSearchDatePicker(false)}
+      >
+        <Pressable
+          style={styles.pickerModalOverlay}
+          onPress={() => setShowSearchDatePicker(false)}
+        >
+          <Pressable
+            style={[
+              styles.pickerModalCard,
+              {
+                backgroundColor: colors.inputBackground,
+                borderColor: colors.border,
+              },
+            ]}
+            onPress={(event) => event.stopPropagation()}
+          >
+            <Text style={[styles.pickerModalTitle, { color: colors.text }]}>
+              {searchDatePickerTarget === "from"
+                ? "From"
+                : searchDatePickerTarget === "to"
+                ? "To"
+                : "Date"}
+            </Text>
+            <View style={[styles.pickerModalSeparator, { backgroundColor: colors.border }]} />
+            <DateTimePicker
+              value={searchDatePickerValue()}
+              mode="date"
+              display={Platform.OS === "ios" ? "inline" : "calendar"}
+              minimumDate={
+                searchDatePickerTarget === "to" && searchDateFrom
+                  ? getStoredDateValue(searchDateFrom)
+                  : undefined
+              }
+              maximumDate={
+                searchDatePickerTarget === "from" && searchDateTo
+                  ? getStoredDateValue(searchDateTo)
+                  : undefined
+              }
+              onChange={(event, date) => {
+                if (Platform.OS === "android") {
+                  if (date) handleSearchDateSelected(date);
+                  else setShowSearchDatePicker(false);
+                } else if (date) {
+                  const value = formatDateForStorage(date);
+                  if (searchDatePickerTarget === "from") {
+                    setSearchDateFrom(value);
+                    if (searchDateTo && value > searchDateTo) {
+                      setSearchDateTo("");
+                    }
+                  } else if (searchDatePickerTarget === "to") {
+                    setSearchDateTo(value);
+                    if (searchDateFrom && value < searchDateFrom) {
+                      setSearchDateFrom("");
+                    }
+                  } else {
+                    setSearchDate(value);
+                  }
+                }
+              }}
+            />
+            <Pressable
+              style={styles.pickerModalDoneButton}
+              onPress={() => setShowSearchDatePicker(false)}
+            >
+              <Text style={[styles.newTaskDateDoneText, { color: colors.text }]}>
+                Done
+              </Text>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {showSearchScreen && (
+        <View
+          style={[
+            styles.searchScreen,
+            { backgroundColor: colors.background },
+          ]}
+        >
+          <View
+            style={[
+              styles.searchScreenTitleContainer,
+              { borderBottomColor: colors.border },
+            ]}
+          >
+            <Text style={[styles.searchScreenTitle, { color: colors.text }]}>
+              Search
+            </Text>
+          </View>
+
+          <View style={styles.searchParameters}>
+            <View style={styles.searchCompactRow}>
+              <Text style={[styles.searchLabel, { color: colors.secondaryText }]}>
+                Workbook
+              </Text>
+              <Pressable
+                style={[
+                  styles.searchSelector,
+                  {
+                    borderColor: colors.border,
+                    backgroundColor: colors.inputBackground,
+                  },
+                ]}
+                onPress={() => setShowSearchWorkbookPicker(true)}
+              >
+                <Text style={[styles.searchSelectorText, { color: colors.text }]}>
+                  {searchWorkbookId === "all"
+                    ? "ALL"
+                    : workbooks.find((w) => w.id === searchWorkbookId)?.name ?? "ALL"}
+                </Text>
+                <Ionicons name="chevron-down" size={16} color={colors.secondaryText} />
+              </Pressable>
+            </View>
+
+            <View style={styles.searchCompactRow}>
+              <Text style={[styles.searchLabel, { color: colors.secondaryText }]}>
+                Location
+              </Text>
+              <Pressable
+                style={[
+                  styles.searchSelector,
+                  {
+                    borderColor: colors.border,
+                    backgroundColor: colors.inputBackground,
+                  },
+                ]}
+                onPress={() => setShowSearchLocationPicker(true)}
+              >
+                <Text style={[styles.searchSelectorText, { color: colors.text }]}>
+                  {searchLocation === "All" ? "ALL" : searchLocation}
+                </Text>
+                <Ionicons name="chevron-down" size={16} color={colors.secondaryText} />
+              </Pressable>
+            </View>
+
+            <View style={styles.searchCompactRow}>
+              <Text style={[styles.searchLabel, { color: colors.secondaryText }]}>
+                Status
+              </Text>
+              <Pressable
+                style={[
+                  styles.searchSelector,
+                  {
+                    borderColor: colors.border,
+                    backgroundColor: colors.inputBackground,
+                  },
+                ]}
+                onPress={() => setShowSearchStatusPicker(true)}
+              >
+                <Text style={[styles.searchSelectorText, { color: colors.text }]}>
+                  {searchStatus.length === 0
+                    ? "ALL"
+                    : searchStatus.map(statusLabel).join(", ")}
+                </Text>
+                <Ionicons name="chevron-down" size={16} color={colors.secondaryText} />
+              </Pressable>
+            </View>
+
+            <View style={styles.searchCompactRow}>
+              <Text style={[styles.searchLabel, { color: colors.secondaryText }]}>
+                Date
+              </Text>
+              <Pressable
+                style={[
+                  styles.searchSelector,
+                  {
+                    borderColor: colors.border,
+                    backgroundColor: colors.inputBackground,
+                  },
+                ]}
+                onPress={() => setShowSearchDateModePicker(true)}
+              >
+                <Text style={[styles.searchSelectorText, { color: colors.text }]}>
+                  {searchDateMode === "all"
+                    ? "ALL"
+                    : searchDateMode === "specific"
+                    ? "Specific date"
+                    : searchDateMode === "between"
+                    ? "From - To"
+                    : searchDateMode === "lastWeek"
+                    ? "Last week"
+                    : searchDateMode === "lastMonth"
+                    ? "Last month"
+                    : "Last year"}
+                </Text>
+                <Ionicons name="chevron-down" size={16} color={colors.secondaryText} />
+              </Pressable>
+            </View>
+
+            {searchDateMode === "specific" && (
+              <View style={styles.searchDateSubRow}>
+                <Text style={[styles.searchDateSubLabel, { color: colors.secondaryText }]}>
+                  Date
+                </Text>
+                <Pressable
+                  style={[styles.searchDateMiniField, { borderColor: colors.border, backgroundColor: colors.inputBackground }]}
+                  onPress={() => {
+                    setSearchDatePickerTarget("specific");
+                    setShowSearchDatePicker(true);
+                  }}
+                >
+                  <Text style={[styles.searchDateMiniText, { color: colors.text }]}>
+                    {searchDate ? formatTaskDate(searchDate) : "Select date"}
+                  </Text>
+                  <Ionicons name="calendar-outline" size={16} color={colors.secondaryText} />
+                </Pressable>
+              </View>
+            )}
+
+            {searchDateMode === "between" && (
+              <View style={styles.searchBetweenRow}>
+                <Pressable
+                  style={[styles.searchDateMiniField, { borderColor: colors.border, backgroundColor: colors.inputBackground }]}
+                  onPress={() => {
+                    setSearchDatePickerTarget("from");
+                    setShowSearchDatePicker(true);
+                  }}
+                >
+                  <Text style={[styles.searchDateMiniText, { color: colors.text }]}>
+                    {searchDateFrom ? formatTaskDate(searchDateFrom) : "Start date"}
+                  </Text>
+                  <Ionicons name="calendar-outline" size={16} color={colors.secondaryText} />
+                </Pressable>
+                <Text style={[styles.searchBetweenText, { color: colors.secondaryText }]}>to</Text>
+                <Pressable
+                  style={[styles.searchDateMiniField, { borderColor: colors.border, backgroundColor: colors.inputBackground }]}
+                  onPress={() => {
+                    setSearchDatePickerTarget("to");
+                    setShowSearchDatePicker(true);
+                  }}
+                >
+                  <Text style={[styles.searchDateMiniText, { color: colors.text }]}>
+                    {searchDateTo ? formatTaskDate(searchDateTo) : "End date"}
+                  </Text>
+                  <Ionicons name="calendar-outline" size={16} color={colors.secondaryText} />
+                </Pressable>
+              </View>
+            )}
+
+            <Pressable
+              style={styles.searchCheckRow}
+              onPress={() => setSearchIncludeHistory((value) => !value)}
+            >
+              <View
+                style={[
+                  styles.searchCheckbox,
+                  {
+                    borderColor: colors.border,
+                    backgroundColor: searchIncludeHistory
+                      ? "#1976D2"
+                      : colors.inputBackground,
+                  },
+                ]}
+              >
+                {searchIncludeHistory && (
+                  <Ionicons name="checkmark" size={14} color="#FFFFFF" />
+                )}
+              </View>
+              <Text style={[styles.searchCheckText, { color: colors.text }]}>
+                Include History
+              </Text>
+            </Pressable>
+
+            <View style={styles.searchTextRow}>
+              <Text style={[styles.searchLabel, { color: colors.secondaryText }]}>
+                Task name
+              </Text>
+              <TextInput
+                style={[
+                  styles.searchTextInput,
+                  {
+                    color: colors.text,
+                    borderColor: colors.border,
+                    backgroundColor: colors.inputBackground,
+                  },
+                ]}
+                value={searchText}
+                onChangeText={setSearchText}
+                placeholder="Search words"
+                placeholderTextColor={colors.secondaryText}
+                returnKeyType="search"
+                onSubmitEditing={runSearch}
+              />
+              <Pressable
+                style={styles.searchButton}
+                onPress={runSearch}
+              >
+                <Ionicons name="search" size={18} color="#FFFFFF" />
+                <Text style={styles.searchButtonText}>Search</Text>
+              </Pressable>
+            </View>
+          </View>
+
+          <ScrollView
+            style={styles.searchResultsScroll}
+            contentContainerStyle={styles.searchResultsContent}
+            showsVerticalScrollIndicator={false}
+          >
+            {!searchHasRun ? (
+              <Text style={[styles.searchEmptyText, { color: colors.secondaryText }]}>
+                Enter your search parameters and press Search.
+              </Text>
+            ) : searchResults.length === 0 ? (
+              <Text style={[styles.searchEmptyText, { color: colors.secondaryText }]}>
+                No results found.
+              </Text>
+            ) : (
+              (() => {
+                const workbookGroups = new Map<string, typeof searchResults>();
+                searchResults.forEach((result) => {
+                  const key = result.workbookId;
+                  if (!workbookGroups.has(key)) workbookGroups.set(key, []);
+                  workbookGroups.get(key)!.push(result);
+                });
+
+                return [...workbookGroups.values()].map((group) => {
+                  const workbookName = group[0].workbookName;
+                  const locationGroups = new Map<string, typeof group>();
+                  group.forEach((result) => {
+                    if (!locationGroups.has(result.location)) {
+                      locationGroups.set(result.location, []);
+                    }
+                    locationGroups.get(result.location)!.push(result);
+                  });
+
+                  return (
+                    <View key={group[0].workbookId} style={styles.searchWorkbookGroup}>
+                      <Text style={[styles.searchWorkbookTitle, { color: colors.text }]}>
+                        {workbookName}
+                      </Text>
+                      {[...locationGroups.entries()]
+                        .sort(([a], [b]) =>
+                          a.localeCompare(b, undefined, { sensitivity: "base" })
+                        )
+                        .map(([location, locationResults]) => (
+                          <View key={location} style={styles.searchLocationGroup}>
+                            <Text
+                              style={[
+                                styles.searchLocationTitle,
+                                { color: colors.secondaryText },
+                              ]}
+                            >
+                              {location}
+                            </Text>
+                            {locationResults.map((result, index) => (
+                              <View
+                                key={`${result.workbookId}-${location}-${result.name}-${result.date}-${index}`}
+                                style={styles.searchResultRow}
+                              >
+                                <View
+                                  style={[
+                                    styles.searchStatusDot,
+                                    { backgroundColor: statusColor(result.status) },
+                                  ]}
+                                />
+                                <Text
+                                  style={[
+                                    styles.searchResultName,
+                                    { color: colors.text },
+                                  ]}
+                                  numberOfLines={1}
+                                >
+                                  {result.name}
+                                </Text>
+                                <Text
+                                  style={[
+                                    styles.searchResultDate,
+                                    { color: colors.secondaryText },
+                                  ]}
+                                >
+                                  {result.date ? formatTaskDate(result.date) : "-"}
+                                </Text>
+                              </View>
+                            ))}
+                          </View>
+                        ))}
+                    </View>
+                  );
+                });
+              })()
+            )}
+          </ScrollView>
+        </View>
+      )}
+
       {/* HOME SCREEN */}
 
-      {!selectedWorkbook && (
+      {!showSearchScreen && !selectedWorkbook && (
         <ScrollView
           contentContainerStyle={
             styles.content
@@ -2206,7 +3327,7 @@ export default function App() {
 
       {/* WORKBOOK SCREEN */}
 
-      {selectedWorkbook && (
+      {!showSearchScreen && selectedWorkbook && (
         <View
           style={[
             styles.workbookScreen,
@@ -2452,9 +3573,10 @@ export default function App() {
                     }
                   >
                     <StatusDot
-                      status={
-                        task.status
-                      }
+                      status={calculateTaskStatus(
+                        task.date,
+                        task.prewarning
+                      )}
                     />
 
                     <Text
@@ -2980,46 +4102,67 @@ export default function App() {
                 />
               </Pressable>
 
-              {showNewTaskDatePicker && (
-                <View
-                  style={[
-                    styles.newTaskDatePickerContainer,
-                    {
-                      borderColor: colors.border,
-                      backgroundColor: colors.inputBackground,
-                    },
-                  ]}
+              <Modal
+                visible={showNewTaskDatePicker}
+                transparent
+                animationType="fade"
+                onRequestClose={() => setShowNewTaskDatePicker(false)}
+              >
+                <Pressable
+                  style={styles.pickerModalOverlay}
+                  onPress={() => setShowNewTaskDatePicker(false)}
                 >
-                  <DateTimePicker
-                    value={getNewTaskDateValue()}
-                    mode="date"
-                    display={Platform.OS === "ios" ? "inline" : "calendar"}
-                    onChange={(event, date) => {
-                      if (Platform.OS === "android") {
-                        setShowNewTaskDatePicker(false);
-                      }
-
-                      if (date) {
-                        setNewTaskDate(formatDateForStorage(date));
-                      }
-                    }}
-                  />
-
                   <Pressable
-                    style={styles.newTaskDateDoneButton}
-                    onPress={() => setShowNewTaskDatePicker(false)}
+                    style={[
+                      styles.pickerModalCard,
+                      {
+                        backgroundColor: colors.inputBackground,
+                        borderColor: colors.border,
+                      },
+                    ]}
+                    onPress={(event) => event.stopPropagation()}
                   >
-                    <Text
-                      style={[
-                        styles.newTaskDateDoneText,
-                        { color: colors.text },
-                      ]}
-                    >
-                      Done
+                    <View style={[styles.pickerModalTitleContainer, { borderBottomColor: colors.border }]}>
+                    <Text style={[styles.pickerModalTitle, { color: colors.text }]}>
+                      Due Date
                     </Text>
+                    </View>
+                    <View
+                      style={[
+                        styles.pickerModalSeparator,
+                        { backgroundColor: colors.border },
+                      ]}
+                    />
+                    <DateTimePicker
+                      value={getNewTaskDateValue()}
+                      mode="date"
+                      display={Platform.OS === "ios" ? "inline" : "calendar"}
+                      onChange={(event, date) => {
+                        if (Platform.OS === "android") {
+                          setShowNewTaskDatePicker(false);
+                        }
+                        if (date) {
+                          setNewTaskDate(formatDateForStorage(date));
+                        }
+                      }}
+                    />
+                    <View
+                      style={[
+                        styles.pickerModalFooterSeparator,
+                        { backgroundColor: colors.border },
+                      ]}
+                    />
+                    <Pressable
+                      style={styles.pickerModalDoneButton}
+                      onPress={() => setShowNewTaskDatePicker(false)}
+                    >
+                      <Text style={[styles.newTaskDateDoneText, { color: colors.text }]}>
+                        Done
+                      </Text>
+                    </Pressable>
                   </Pressable>
-                </View>
-              )}
+                </Pressable>
+              </Modal>
 
               {newTaskDate.trim() !== "" && (
                 <>
@@ -3227,106 +4370,139 @@ export default function App() {
                 </Pressable>
               </View>
 
-              {showNewTaskReminderDatePicker && (
-                <View
-                  style={[
-                    styles.newTaskDatePickerContainer,
-                    {
-                      borderColor: colors.border,
-                      backgroundColor: colors.inputBackground,
-                    },
-                  ]}
+              <Modal
+                visible={showNewTaskReminderDatePicker}
+                transparent
+                animationType="fade"
+                onRequestClose={() => setShowNewTaskReminderDatePicker(false)}
+              >
+                <Pressable
+                  style={styles.pickerModalOverlay}
+                  onPress={() => setShowNewTaskReminderDatePicker(false)}
                 >
-                  <DateTimePicker
-                    value={getStoredDateValue(newTaskReminderDate)}
-                    mode="date"
-                    display={Platform.OS === "ios" ? "inline" : "calendar"}
-                    onChange={(event, date) => {
-                      if (Platform.OS === "android") {
-                        setShowNewTaskReminderDatePicker(false);
-                      }
-                      if (date) {
-                        setNewTaskReminderDate(
-                          formatDateForStorage(date)
-                        );
-                      }
-                    }}
-                  />
-                  <View style={styles.datePickerActionRow}>
-                    <Pressable
-                      style={styles.newTaskDateDoneButton}
-                      onPress={() => setNewTaskReminderDate("")}
-                    >
-                      <Text
-                        style={[
-                          styles.newTaskDateDoneText,
-                          { color: colors.secondaryText },
-                        ]}
+                  <Pressable
+                    style={[
+                      styles.pickerModalCard,
+                      {
+                        backgroundColor: colors.inputBackground,
+                        borderColor: colors.border,
+                      },
+                    ]}
+                    onPress={(event) => event.stopPropagation()}
+                  >
+                    <View style={[styles.pickerModalTitleContainer, { borderBottomColor: colors.border }]}>
+                    <Text style={[styles.pickerModalTitle, { color: colors.text }]}>
+                      Reminder Date
+                    </Text>
+                    </View>
+                    <View
+                      style={[
+                        styles.pickerModalSeparator,
+                        { backgroundColor: colors.border },
+                      ]}
+                    />
+                    <DateTimePicker
+                      value={getStoredDateValue(newTaskReminderDate)}
+                      mode="date"
+                      display={Platform.OS === "ios" ? "inline" : "calendar"}
+                      onChange={(event, date) => {
+                        if (Platform.OS === "android") {
+                          setShowNewTaskReminderDatePicker(false);
+                        }
+                        if (date) {
+                          setNewTaskReminderDate(formatDateForStorage(date));
+                        }
+                      }}
+                    />
+                    <View
+                      style={[
+                        styles.pickerModalFooterSeparator,
+                        { backgroundColor: colors.border },
+                      ]}
+                    />
+                    <View style={styles.datePickerActionRow}>
+                      <Pressable
+                        style={styles.newTaskDateDoneButton}
+                        onPress={() => setNewTaskReminderDate("")}
                       >
-                        Clear
-                      </Text>
-                    </Pressable>
-                    <Pressable
-                      style={styles.newTaskDateDoneButton}
-                      onPress={() =>
-                        setShowNewTaskReminderDatePicker(false)
-                      }
-                    >
-                      <Text
-                        style={[
-                          styles.newTaskDateDoneText,
-                          { color: colors.text },
-                        ]}
+                        <Text style={[styles.newTaskDateDoneText, { color: colors.secondaryText }]}>
+                          Clear
+                        </Text>
+                      </Pressable>
+                      <Pressable
+                        style={styles.newTaskDateDoneButton}
+                        onPress={() => setShowNewTaskReminderDatePicker(false)}
                       >
+                        <Text style={[styles.newTaskDateDoneText, { color: colors.text }]}>
+                          Done
+                        </Text>
+                      </Pressable>
+                    </View>
+                  </Pressable>
+                </Pressable>
+              </Modal>
+
+              <Modal
+                visible={showNewTaskReminderTimePicker}
+                transparent
+                animationType="fade"
+                onRequestClose={() => setShowNewTaskReminderTimePicker(false)}
+              >
+                <Pressable
+                  style={styles.pickerModalOverlay}
+                  onPress={() => setShowNewTaskReminderTimePicker(false)}
+                >
+                  <Pressable
+                    style={[
+                      styles.pickerModalCard,
+                      {
+                        backgroundColor: colors.inputBackground,
+                        borderColor: colors.border,
+                      },
+                    ]}
+                    onPress={(event) => event.stopPropagation()}
+                  >
+                    <View style={[styles.pickerModalTitleContainer, { borderBottomColor: colors.border }]}>
+                    <Text style={[styles.pickerModalTitle, { color: colors.text }]}>
+                      Reminder Time
+                    </Text>
+                    </View>
+                    <View
+                      style={[
+                        styles.pickerModalSeparator,
+                        { backgroundColor: colors.border },
+                      ]}
+                    />
+                    <DateTimePicker
+                      value={getStoredTimeValue(newTaskReminderTime)}
+                      mode="time"
+                      display={Platform.OS === "ios" ? "spinner" : "clock"}
+                      onChange={(event, date) => {
+                        if (Platform.OS === "android") {
+                          setShowNewTaskReminderTimePicker(false);
+                        }
+                        if (date) {
+                          setNewTaskReminderTime(formatTimeForStorage(date));
+                        }
+                      }}
+                    />
+                    <View
+                      style={[
+                        styles.pickerModalFooterSeparator,
+                        { backgroundColor: colors.border },
+                      ]}
+                    />
+                    <Pressable
+                      style={styles.pickerModalDoneButton}
+                      onPress={() => setShowNewTaskReminderTimePicker(false)}
+                    >
+                      <Text style={[styles.newTaskDateDoneText, { color: colors.text }]}>
                         Done
                       </Text>
                     </Pressable>
-                  </View>
-                </View>
-              )}
-
-              {showNewTaskReminderTimePicker && (
-                <View
-                  style={[
-                    styles.newTaskDatePickerContainer,
-                    {
-                      borderColor: colors.border,
-                      backgroundColor: colors.inputBackground,
-                    },
-                  ]}
-                >
-                  <DateTimePicker
-                    value={getStoredTimeValue(newTaskReminderTime)}
-                    mode="time"
-                    display={Platform.OS === "ios" ? "spinner" : "clock"}
-                    onChange={(event, date) => {
-                      if (Platform.OS === "android") {
-                        setShowNewTaskReminderTimePicker(false);
-                      }
-                      if (date) {
-                        setNewTaskReminderTime(
-                          formatTimeForStorage(date)
-                        );
-                      }
-                    }}
-                  />
-                  <Pressable
-                    style={styles.newTaskDateDoneButton}
-                    onPress={() =>
-                      setShowNewTaskReminderTimePicker(false)
-                    }
-                  >
-                    <Text
-                      style={[
-                        styles.newTaskDateDoneText,
-                        { color: colors.text },
-                      ]}
-                    >
-                      Done
-                    </Text>
                   </Pressable>
-                </View>
-              )}
+                </Pressable>
+              </Modal>
 
                   </ScrollView>
 
@@ -3475,16 +4651,41 @@ export default function App() {
                           color={colors.secondaryText}
                         />
                       </Pressable>
-                      {showCompletionDatePicker && (
+                      <Modal
+  visible={showCompletionDatePicker}
+  transparent
+  animationType="fade"
+  onRequestClose={() => setShowCompletionDatePicker(false)}
+>
+  <Pressable
+    style={styles.pickerModalOverlay}
+    onPress={() => setShowCompletionDatePicker(false)}
+  >
+    <Pressable
+      style={styles.pickerModalPopupPressable}
+      onPress={(event) => event.stopPropagation()}
+    >
                         <View
                           style={[
-                            styles.newTaskDatePickerContainer,
+                            styles.pickerModalCard,
+                          styles.newTaskDatePickerContainer,
                             {
                               borderColor: colors.border,
                               backgroundColor: colors.inputBackground,
                             },
                           ]}
                         >
+                           <View style={[styles.pickerModalTitleContainer, { borderBottomColor: colors.border }]}>
+                           <Text style={[styles.pickerModalTitle, { color: colors.text }]}>
+                             Completion Date
+                           </Text>
+                           </View>
+                           <View
+                             style={[
+                               styles.pickerModalSeparator,
+                               { backgroundColor: colors.border },
+                             ]}
+                           />
                           <DateTimePicker
                             value={getStoredDateValue(completionDate)}
                             mode="date"
@@ -3502,6 +4703,12 @@ export default function App() {
                               }
                             }}
                           />
+                          <View
+                            style={[
+                              styles.pickerModalFooterSeparator,
+                              { backgroundColor: colors.border },
+                            ]}
+                          />
                           <Pressable
                             style={styles.newTaskDateDoneButton}
                             onPress={() =>
@@ -3518,7 +4725,10 @@ export default function App() {
                             </Text>
                           </Pressable>
                         </View>
-                      )}
+                      
+    </Pressable>
+  </Pressable>
+</Modal>
                       {completionDateError ? (
                         <Text
                           style={[
@@ -4028,9 +5238,23 @@ export default function App() {
                         color={colors.secondaryText}
                       />
                     </Pressable>
-                    {showRecordEditDatePicker && (
+                    <Modal
+  visible={showRecordEditDatePicker}
+  transparent
+  animationType="fade"
+  onRequestClose={() => setShowRecordEditDatePicker(false)}
+>
+  <Pressable
+    style={styles.pickerModalOverlay}
+    onPress={() => setShowRecordEditDatePicker(false)}
+  >
+    <Pressable
+      style={styles.pickerModalPopupPressable}
+      onPress={(event) => event.stopPropagation()}
+    >
                       <View
                         style={[
+                          styles.pickerModalCard,
                           styles.newTaskDatePickerContainer,
                           {
                             borderColor: colors.border,
@@ -4038,6 +5262,17 @@ export default function App() {
                           },
                         ]}
                       >
+                         <View style={[styles.pickerModalTitleContainer, { borderBottomColor: colors.border }]}>
+                         <Text style={[styles.pickerModalTitle, { color: colors.text }]}>
+                           Completion Date
+                         </Text>
+                         </View>
+                         <View
+                           style={[
+                             styles.pickerModalSeparator,
+                             { backgroundColor: colors.border },
+                           ]}
+                         />
                         <DateTimePicker
                           value={getStoredDateValue(recordEditDate)}
                           mode="date"
@@ -4055,6 +5290,12 @@ export default function App() {
                             }
                           }}
                         />
+                        <View
+                          style={[
+                            styles.pickerModalFooterSeparator,
+                            { backgroundColor: colors.border },
+                          ]}
+                        />
                         <Pressable
                           style={styles.newTaskDateDoneButton}
                           onPress={() =>
@@ -4071,7 +5312,10 @@ export default function App() {
                           </Text>
                         </Pressable>
                       </View>
-                    )}
+                    
+    </Pressable>
+  </Pressable>
+</Modal>
                     {recordEditDateError ? (
                       <Text
                         style={[
@@ -4251,6 +5495,8 @@ function StatusDot({
       ? "#F39C12"
       : status === "blue"
       ? "#1976D2"
+      : status === "gray"
+      ? "#BDBDBD"
       : "#43A047";
 
   return (
@@ -4328,6 +5574,243 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "600",
     fontStyle: "italic",
+  },
+
+  searchScreen: {
+    flex: 1,
+  },
+
+  searchScreenTitleContainer: {
+    minHeight: 42,
+    paddingHorizontal: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+
+  searchScreenTitle: {
+    fontSize: 22,
+    fontWeight: "700",
+  },
+
+  searchParameters: {
+    paddingHorizontal: 12,
+    paddingTop: 8,
+    paddingBottom: 6,
+  },
+
+  searchCompactRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    minHeight: 34,
+    marginBottom: 4,
+  },
+
+  searchLabel: {
+    width: 78,
+    fontSize: 13,
+  },
+
+  searchSelector: {
+    flex: 1,
+    minHeight: 32,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+
+  searchSelectorText: {
+    fontSize: 14,
+    flex: 1,
+  },
+
+  searchCheckRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    minHeight: 30,
+    marginBottom: 4,
+  },
+
+  searchCheckbox: {
+    width: 18,
+    height: 18,
+    borderWidth: 1,
+    borderRadius: 4,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 8,
+  },
+
+  searchCheckText: {
+    fontSize: 13,
+  },
+
+  searchTextRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    minHeight: 36,
+  },
+
+  searchTextInput: {
+    flex: 1,
+    minHeight: 32,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    fontSize: 14,
+    marginRight: 7,
+  },
+
+  searchButton: {
+    height: 32,
+    paddingHorizontal: 13,
+    borderRadius: 8,
+    backgroundColor: "#1976D2",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  searchButtonText: {
+    color: "#FFFFFF",
+    fontSize: 13,
+    fontWeight: "600",
+    marginLeft: 5,
+  },
+
+  searchDateSubRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginLeft: 78,
+    marginBottom: 4,
+  },
+
+  searchDateSubLabel: {
+    fontSize: 12,
+    width: 42,
+  },
+
+  searchDateMiniField: {
+    flex: 1,
+    minHeight: 30,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 9,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+
+  searchDateMiniText: {
+    fontSize: 13,
+    flex: 1,
+  },
+
+  searchBetweenRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginLeft: 78,
+    marginBottom: 4,
+  },
+
+  searchBetweenText: {
+    fontSize: 12,
+    marginHorizontal: 5,
+  },
+
+  searchResultsHeader: {
+    borderTopWidth: 2,
+    paddingHorizontal: 12,
+    paddingTop: 7,
+    paddingBottom: 4,
+  },
+
+  searchResultsScroll: {
+    flex: 1,
+  },
+
+  searchResultsContent: {
+    paddingHorizontal: 12,
+    paddingBottom: 40,
+  },
+
+  searchEmptyText: {
+    fontSize: 14,
+    textAlign: "center",
+    marginTop: 30,
+  },
+
+  searchWorkbookGroup: {
+    marginBottom: 12,
+  },
+
+  searchWorkbookTitle: {
+    fontSize: 16,
+    fontWeight: "700",
+    marginBottom: 6,
+  },
+
+  searchLocationGroup: {
+    marginBottom: 8,
+    paddingLeft: 10,
+  },
+
+  searchLocationTitle: {
+    fontSize: 13,
+    fontWeight: "600",
+    marginBottom: 3,
+  },
+
+  searchResultRow: {
+    minHeight: 28,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingLeft: 10,
+  },
+
+  searchStatusDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    marginRight: 6,
+  },
+
+  searchResultName: {
+    flex: 1,
+    fontSize: 13,
+    marginRight: 7,
+  },
+
+  searchResultDate: {
+    fontSize: 12,
+    width: 72,
+    textAlign: "right",
+  },
+
+  searchPickerList: {
+    width: "100%",
+    maxHeight: 300,
+  },
+
+  searchPickerOption: {
+    width: "100%",
+    minHeight: 38,
+    paddingHorizontal: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+
+  searchPickerOptionText: {
+    fontSize: 14,
+  },
+
+  searchPickerCheckBox: {
+    flexDirection: "row",
+    alignItems: "center",
   },
 
   /* HOME */
@@ -5351,6 +6834,63 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     marginBottom: 18,
   },
+
+  pickerModalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.35)",
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 20,
+  },
+
+  pickerModalPopupPressable: {
+    width: "100%",
+    maxWidth: 360,
+    alignItems: "center",
+  },
+
+  pickerModalCard: {
+    width: "100%",
+    maxWidth: 360,
+    borderWidth: 1,
+    borderRadius: 16,
+    paddingTop: 16,
+    paddingBottom: 8,
+    alignItems: "center",
+  },
+
+  pickerModalTitleContainer: {
+    alignSelf: "stretch",
+    width: "100%",
+    borderBottomWidth: 1,
+    paddingBottom: 10,
+    marginBottom: 4,
+    alignItems: "center",
+  },
+
+  pickerModalTitle: {
+    fontSize: 17,
+    fontWeight: "600",
+  },
+
+  pickerModalSeparator: {
+    display: "none",
+  },
+
+
+  pickerModalDoneButton: {
+    alignSelf: "flex-end",
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+  },
+  pickerModalFooterSeparator: {
+    alignSelf: "stretch",
+    width: "100%",
+    height: 1,
+    marginTop: 8,
+    marginBottom: 0,
+  },
+
 
   newTaskDatePickerField: {
     flexDirection: "row",
