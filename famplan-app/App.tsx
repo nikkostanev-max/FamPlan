@@ -396,6 +396,8 @@ export default function App() {
 
   const [selectedTaskId, setSelectedTaskId] =
     useState<string | null>(null);
+  const [openedFromSearch, setOpenedFromSearch] =
+    useState<"task" | "record" | null>(null);
 
   const [showCreateWorkbook, setShowCreateWorkbook] =
     useState(false);
@@ -672,6 +674,12 @@ export default function App() {
   };
   const goBackToWorkbook = () => {
     setSelectedTaskId(null);
+
+    if (openedFromSearch === "task") {
+      setSelectedWorkbookId(null);
+      setOpenedFromSearch(null);
+      setShowSearchScreen(true);
+    }
   };
 
   const openTask = (task: Task) => {
@@ -896,6 +904,12 @@ export default function App() {
       setSelectedTaskId(null);
     }
 
+    if (openedFromSearch === "task") {
+      setSelectedWorkbookId(null);
+      setOpenedFromSearch(null);
+      setShowSearchScreen(true);
+    }
+
     setShowCompleteTask(false);
     setIsEditingTask(false);
     setSelectedTaskId(null);
@@ -921,6 +935,13 @@ export default function App() {
   const closeTaskRecord = () => {
     setShowTaskRecord(false);
     setSelectedHistoryRecord(null);
+
+    if (openedFromSearch === "record") {
+      setSelectedTaskId(null);
+      setSelectedWorkbookId(null);
+      setOpenedFromSearch(null);
+      setShowSearchScreen(true);
+    }
   };
 
   const openRecordEdit = () => {
@@ -1112,12 +1133,14 @@ export default function App() {
 
     const results: Array<{
       workbookId: string;
+      taskId: string;
       workbookName: string;
       location: string;
       name: string;
       date: string;
       status: TaskStatus;
       history: boolean;
+      historyRecord?: TaskHistoryRecord;
     }> = [];
 
     const sourceWorkbooks =
@@ -1162,6 +1185,7 @@ export default function App() {
 
         results.push({
           workbookId: workbook.id,
+          taskId: task.id,
           workbookName: workbook.name,
           location,
           name: task.name,
@@ -1194,12 +1218,14 @@ export default function App() {
 
             results.push({
               workbookId: workbook.id,
+              taskId: task.id,
               workbookName: workbook.name,
               location,
               name: task.name,
               date: record.date,
               status: "green",
               history: true,
+              historyRecord: record,
             });
           });
         }
@@ -1221,8 +1247,8 @@ export default function App() {
       );
       if (locationCompare !== 0) return locationCompare;
 
-      return (a.date || "9999-12-31").localeCompare(
-        b.date || "9999-12-31"
+      return (b.date || "0000-01-01").localeCompare(
+        a.date || "0000-01-01"
       );
     });
   }, [
@@ -1295,6 +1321,39 @@ export default function App() {
     setShowSearchWorkbookPicker(false);
     setShowSearchLocationPicker(false);
     setSearchHasRun(true);
+  };
+
+  const openSearchResult = (result: {
+    workbookId: string;
+    taskId: string;
+    history: boolean;
+    historyRecord?: TaskHistoryRecord;
+  }) => {
+    const task = (tasksByWorkbook[result.workbookId] ?? []).find(
+      (item) => item.id === result.taskId
+    );
+
+    const workbook = workbooks.find(
+      (item) => item.id === result.workbookId
+    );
+
+    if (!task || !workbook) return;
+
+    setSelectedWorkbookId(workbook.id);
+    setSelectedTaskId(task.id);
+    setIsEditingTask(false);
+
+    if (result.history && result.historyRecord) {
+      setSelectedHistoryRecord(result.historyRecord);
+      setShowTaskRecord(true);
+      setOpenedFromSearch("record");
+    } else {
+      setSelectedHistoryRecord(null);
+      setShowTaskRecord(false);
+      setOpenedFromSearch("task");
+      openTask(task);
+    }
+
   };
 
   const createWorkbook = () => {
@@ -3113,9 +3172,13 @@ export default function App() {
                               {location}
                             </Text>
                             {locationResults.map((result, index) => (
-                              <View
+                              <Pressable
                                 key={`${result.workbookId}-${location}-${result.name}-${result.date}-${index}`}
-                                style={styles.searchResultRow}
+                                style={({ pressed }) => [
+                                  styles.searchResultRow,
+                                  { opacity: pressed ? 0.65 : 1 },
+                                ]}
+                                onPress={() => openSearchResult(result)}
                               >
                                 <View
                                   style={[
@@ -3140,7 +3203,7 @@ export default function App() {
                                 >
                                   {result.date ? formatTaskDate(result.date) : "-"}
                                 </Text>
-                              </View>
+                              </Pressable>
                             ))}
                           </View>
                         ))}
