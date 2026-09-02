@@ -3161,7 +3161,7 @@ export default function App() {
                         .sort(([a], [b]) =>
                           a.localeCompare(b, undefined, { sensitivity: "base" })
                         )
-                        .map(([location, locationResults]) => (
+                        .map(([location, locationResults], locationIndex, sortedLocations) => (
                           <View key={location} style={styles.searchLocationGroup}>
                             <Text
                               style={[
@@ -3205,8 +3205,31 @@ export default function App() {
                                 </Text>
                               </Pressable>
                             ))}
+
+                            {locationIndex !== sortedLocations.length - 1 && (
+                              <View
+                                style={[
+                                  styles.searchLocationSeparator,
+                                  {
+                                    backgroundColor: colors.border,
+                                    height: 1,
+                                  },
+                                ]}
+                              />
+                            )}
                           </View>
                         ))}
+                      <View
+                        style={[
+                          styles.searchLocationSeparator,
+                          {
+                            backgroundColor: colors.border,
+                            height: 2,
+                            width: "100%",
+                            marginTop: 2,
+                          },
+                        ]}
+                      />
                     </View>
                   );
                 });
@@ -5819,6 +5842,11 @@ const styles = StyleSheet.create({
   searchLocationGroup: {
     marginBottom: 8,
     paddingLeft: 10,
+  },
+
+  searchLocationSeparator: {
+    width: "100%",
+    marginTop: 6,
   },
 
   searchLocationTitle: {
